@@ -2,7 +2,8 @@
 
 Guía para instalar la aplicación en la cuenta de Google de Impulsa, sin experiencia previa en
 Apps Script. Se hace una sola vez; la sección 6 explica cómo actualizar el código después y la
-sección 7 cómo cargar los datos reales del semestre.
+sección 7 cómo cargar los datos reales del semestre. El código lo sube clasp (sección 0, decisión
+T-14 del portal); pegarlo a mano en el editor queda como camino alternativo.
 
 **Si ya instalaste el primer prototipo**, no repitas las secciones 1 a 5: ve directo a la
 sección 7, que dice qué volver a pegar y qué cargar.
@@ -16,8 +17,9 @@ Necesitas:
   Drive de esa cuenta).
 - Una clave de la API de Gemini creada con esa misma cuenta, en
   [Google AI Studio](https://aistudio.google.com/apikey) (gratuita).
-- Los cinco archivos de la carpeta `src/` de este repositorio, abiertos en un editor de texto
-  (el Bloc de notas sirve) para copiar su contenido.
+- clasp en tu computador, el mismo que usas para el portal (sección 0). Solo si instalas a
+  mano: los cinco archivos de código de la carpeta `src/` de este repositorio, abiertos en un
+  editor de texto (el Bloc de notas sirve) para copiar su contenido.
 - Los tres archivos de datos reales del semestre, en
   `C:\Users\ignac\Proyectos\copiloto-tutorias-appscript\datos\`: `tutores.csv`,
   `duplas.csv` y `equipos.csv`. No están en git: viven solo en tu computador y en la planilla.
@@ -28,6 +30,47 @@ la etiqueta que usa la documentación de Google en español. Las pocas etiquetas
 pudieron verificar en la documentación oficial están marcadas como tales.
 
 ---
+
+## 0. Sesión de clasp: qué haces tú y qué hace Claude Code
+
+El código vive en `src/` y lo sube clasp: los cinco archivos de código y el manifiesto
+`appsscript.json`, copiado tal cual del editor. `.clasp.json` (fuera de git) apunta al proyecto
+de Apps Script del Copiloto.
+
+- **Tú** abres la sesión de clasp con la cuenta de Impulsa, en tu propia ventana de PowerShell,
+  desde la carpeta del proyecto:
+
+  ```powershell
+  cd C:\Users\ignac\Proyectos\copiloto-tutorias-appscript
+  ```
+
+  ```powershell
+  clasp login
+  ```
+
+  Se abre el navegador: entra con la cuenta de Impulsa y acepta los permisos. Si ya abriste la
+  sesión para el portal, sirve la misma: la credencial de clasp es de la cuenta, no del proyecto.
+
+- **Claude Code** solo ejecuta `clasp push` (sube `src/`), `clasp push --force` (solo cuando clasp
+  pide confirmar el reemplazo del manifiesto, y después de mostrarte la diferencia de
+  `appsscript.json`), `clasp list-deployments`, `clasp update-deployment <id>`,
+  `clasp show-authorized-user` y `clasp logout`, y te pide permiso antes de cada uno. Cuando le
+  dices que terminaron por hoy, cierra la sesión con `clasp logout` y confirma con
+  `clasp show-authorized-user` que no quedó abierta. Nunca inicia la sesión ni lee la credencial
+  de clasp (`.clasprc.json`). Si clasp dice que no hay credenciales, te pedirá que ejecutes
+  `clasp login`.
+- `clasp push` **reemplaza todo el proyecto en línea** por los archivos de `src/`. No edites el
+  código directamente en el editor de Apps Script: el siguiente `clasp push` borraría ese cambio.
+- Mientras la sesión está abierta, un programa de tu computador con esa credencial puede
+  modificar los proyectos de Apps Script de Impulsa. Si la quieres cerrar tú mismo:
+
+  ```powershell
+  clasp logout
+  ```
+
+Antes del primer `clasp push`, la API de Apps Script debe estar activada para la cuenta de
+Impulsa en https://script.google.com/home/usersettings (no verificado: el nombre exacto del
+interruptor en esa página). Si ya usas clasp con el portal, ya está activada.
 
 ## 1. Crear la planilla y abrir el editor de Apps Script
 
@@ -43,7 +86,13 @@ pudieron verificar en la documentación oficial están marcadas como tales.
 
 ## 2. Crear los cinco archivos
 
-El proyecto trae un archivo de código de ejemplo (`Code.gs` o `Código.gs`). Debe quedar con
+**Con clasp** no hace falta crearlos a mano. Copia el ID del script desde **Project Settings**
+(en español, **Configuración del proyecto**; la documentación no da el rótulo exacto del campo)
+en `scriptId` de `.clasp.json`, abre la sesión (sección 0) y pídele a Claude Code que ejecute
+`clasp push`: reemplaza el archivo de ejemplo por los cinco de `src/` y el manifiesto. Sigue en
+la sección 3.
+
+**A mano** (camino alternativo): el proyecto trae un archivo de código de ejemplo (`Code.gs` o `Código.gs`). Debe quedar con
 estos cinco archivos, con estos nombres y tipos exactos:
 
 | Archivo en el editor | Tipo | Contenido que se pega |
@@ -157,7 +206,28 @@ igual, pero el acta sale de la plantilla sin IA.
 
 ## 6. Actualizar el código sin cambiar la URL
 
-Cuando cambie el código, el aviso del cambio dice qué archivos de `src/` volver a pegar.
+Cuando cambie el código, el aviso del cambio dice qué archivos de `src/` cambiaron.
+
+### 6.1 Con clasp
+
+1. Abre la sesión de clasp (sección 0) y pídele a Claude Code que suba el cambio. Te pedirá
+   permiso para `clasp show-authorized-user` (confirma que la sesión es la de Impulsa) y para
+   `clasp push`, que reemplaza todo el proyecto en línea por `src/`. Si clasp pide confirmar el
+   reemplazo del manifiesto, Claude Code se detiene y te muestra la diferencia de
+   `src/appsscript.json` antes de pedirte permiso para `clasp push --force`.
+2. Si cambió `Codigo.gs` o `Datos.gs`, corre `configurarPlanilla` otra vez en el editor (pasos 3.1
+   y 3.2). Si pide autorizar permisos nuevos, repite los pasos 3.3 a 3.5.
+3. Para que la URL publicada use el código nuevo, Claude Code te pedirá permiso para
+   `clasp list-deployments` y después para `clasp update-deployment <id>`, con el id de la
+   implementación que usan los tutores (la de la sección 5). Si hay más de una, te preguntará
+   cuál.
+4. Al terminar la jornada, dile a Claude Code que terminaron por hoy: cierra la sesión de clasp
+   (sección 0).
+
+La URL queda igual. `clasp push` solo cambia el código del proyecto; la URL de los tutores usa
+el código nuevo recién después de `clasp update-deployment`.
+
+### 6.2 A mano en el editor (camino alternativo)
 
 1. En el editor, abre cada archivo que cambió, borra su contenido, pega el nuevo y guarda.
 2. Si cambió `Codigo.gs` o `Datos.gs`, corre `configurarPlanilla` otra vez (pasos 3.1 y 3.2).
@@ -170,7 +240,8 @@ Cuando cambie el código, el aviso del cambio dice qué archivos de `src/` volve
    **Versión nueva**).
 6. Haz clic en **Deploy** (en español, **Implementar**).
 
-La URL queda igual. No uses **New deployment** para actualizar: crea una URL distinta.
+La URL queda igual. No uses **New deployment** para actualizar: crea una URL distinta. Si después
+vuelves a usar clasp, lo que pegaste debe ser igual a `src/`: `clasp push` lo reemplaza.
 
 ## 7. Cargar los datos reales del semestre (segunda versión)
 
@@ -182,7 +253,8 @@ empieza en el paso 7.3.
 
 En esta versión cambiaron cuatro archivos de `src/`: `Codigo.gs`, `Datos.gs`,
 `Estilos.html` y `Cliente.html`. `Index.html` no cambió. En el editor de Apps Script, abre
-cada uno de los cuatro, borra todo su contenido, pega el nuevo y guarda (sección 6, paso 1).
+cada uno de los cuatro, borra todo su contenido, pega el nuevo y guarda (sección 6.2, paso 1).
+Con clasp basta con `clasp push` (sección 6.1, paso 1).
 
 ### 7.2 Correr configurarPlanilla
 
@@ -250,8 +322,8 @@ fecha). La página sugiere el próximo hito según la fecha de hoy.
 
 ### 7.6 Actualizar el despliegue sin cambiar la URL
 
-Sigue la sección 6 desde el paso 3: **Deploy > Manage deployments**, **Edit**, **New version** y
-**Deploy**. La URL que tienen los tutores sigue igual.
+Con clasp, sección 6.1, paso 3. A mano, sección 6.2 desde el paso 3: **Deploy > Manage
+deployments**, **Edit**, **New version** y **Deploy**. La URL que tienen los tutores sigue igual.
 
 ---
 
@@ -352,10 +424,11 @@ cualquiera que abra la URL de la app, y no muestra nombres de estudiantes.
 ### 9.1 Volver a pegar los archivos y actualizar el despliegue
 
 1. En esta versión cambiaron cuatro archivos de `src/`: `Codigo.gs`, `Index.html`,
-   `Estilos.html` y `Cliente.html`. `Datos.gs` no cambió. Pega los cuatro (sección 6, paso 1).
+   `Estilos.html` y `Cliente.html`. `Datos.gs` no cambió. Súbelos con clasp (sección 6.1, paso 1)
+   o pega los cuatro (sección 6.2, paso 1).
 2. No hay pestañas ni columnas nuevas ni permisos nuevos. Correr `configurarPlanilla` no hace
-   falta, pero tampoco hace daño (sección 6, paso 2).
-3. Actualiza el despliegue sin cambiar la URL: sección 6, pasos 3 a 6.
+   falta, pero tampoco hace daño.
+3. Actualiza el despliegue sin cambiar la URL: sección 6.1, paso 3, o sección 6.2, pasos 3 a 6.
 
 ### 9.2 Probar el Panel
 
@@ -382,7 +455,7 @@ cualquiera que abra la URL de la app, y no muestra nombres de estudiantes.
 
 Si el Panel dice que no se pudo cargar, revisa que las pestañas `Equipos`, `Tutorias`,
 `Respuestas`, `Actas`, `Compromisos` y `ConsultasEquipo` existan (sección 3) y que hayas
-actualizado el despliegue con una versión nueva (sección 6, pasos 3 a 6).
+actualizado el despliegue (sección 6.1, paso 3, o sección 6.2, pasos 3 a 6).
 
 ---
 
@@ -442,3 +515,14 @@ actualizado el despliegue con una versión nueva (sección 6, pasos 3 a 6).
 13. Proteger hojas y rangos, con advertencia (**Data > Protect sheets and ranges**):
     https://support.google.com/docs/answer/1218656
     (en español: https://support.google.com/docs/answer/1218656?hl=es-419)
+14. clasp (comandos `login`, `logout`, `push`, `list-deployments`, `update-deployment`,
+    `show-authorized-user`; `push` reemplaza todo el proyecto en línea):
+    https://github.com/google/clasp
+15. Manifiesto en el editor (**Project Settings > Show "appsscript.json" manifest file in
+    editor**; en español, **Configuración del proyecto > Mostrar el archivo de manifiesto
+    "appsscript.json" en el editor**):
+    https://developers.google.com/apps-script/concepts/manifests
+    (en español: https://developers.google.com/apps-script/concepts/manifests?hl=es-419)
+16. ID del script en **Project Settings** (en español, **Configuración del proyecto**):
+    https://developers.google.com/apps-script/guides/libraries
+    (en español: https://developers.google.com/apps-script/guides/libraries?hl=es-419)

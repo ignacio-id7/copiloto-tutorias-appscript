@@ -20,9 +20,19 @@ Estas reglas no se relajan sin decisión explícita del usuario:
 6. **Ningún secreto en el código ni en git.** La clave de Gemini va en las propiedades del
    script, con la clave `CLAVE_API_GEMINI`.
 7. **Código, nombres y comentarios en español; identificadores sin tildes.**
-8. **El código lo instala el usuario copiándolo a mano** en el editor de Apps Script (ver
-   abajo). Todo cambio futuro dice qué archivos de `src/` cambiaron, para que sepa cuáles
-   volver a pegar.
+8. **Despliegue (T-14 del portal, igual que su T-10).** Claude Code puede ejecutar solo estos
+   comandos de clasp, y siempre pide permiso antes de cada uno:
+   - `clasp push`.
+   - `clasp push --force`, solo si clasp pide confirmar el reemplazo del manifiesto, y después de
+     mostrarle al usuario la diferencia de `src/appsscript.json`.
+   - `clasp list-deployments`, `clasp update-deployment <id>` y `clasp show-authorized-user`.
+   - `clasp logout`. Cuando el usuario dice que terminamos por hoy, Claude Code ejecuta
+     `clasp logout` y después `clasp show-authorized-user` para confirmar que no quedó sesión.
+
+   Nunca ejecuta `clasp login`, `clasp pull` ni ningún otro comando u opción de clasp, y nunca lee
+   ningún `.clasprc.json`. Si clasp dice que no hay credenciales, se detiene y le pide al usuario
+   que ejecute `clasp login` en PowerShell. Las reglas están también en `.claude/settings.json`.
+   Todo cambio dice qué archivos de `src/` cambiaron.
 9. **Los comandos que se le entregan al usuario van uno por bloque, en PowerShell y con rutas
    de Windows.**
 10. **Los datos reales nunca entran a git.** `datos/` (CSV de tutores, duplas y equipos con
@@ -31,15 +41,20 @@ Estas reglas no se relajan sin decisión explícita del usuario:
 
 ## Forma de trabajo
 
-Claude no se conecta a ninguna cuenta de Google ni usa clasp. Escribe el código aquí y el
-usuario lo pega en el editor de Apps Script de una planilla de la cuenta de Impulsa
-(`INSTALACION.md`). Por eso:
+Claude no se conecta a ninguna cuenta de Google. El usuario abre la sesión de clasp con la
+cuenta de Impulsa en su PowerShell, y Claude Code sube `src/` con los comandos de la regla 8
+(`INSTALACION.md`, secciones 0 y 6). Pegar a mano en el editor queda como camino alternativo.
+`clasp push` reemplaza todo el proyecto en línea, así que nada se edita directamente en el
+editor. Por eso:
 
-- Como máximo cinco archivos, en `src/`, con el mismo nombre que tienen en el editor:
-  `Codigo.gs` (servidor), `Datos.gs` (banco de preguntas e hitos de ejemplo), `Index.html`,
-  `Estilos.html` y `Cliente.html` (JavaScript del navegador, incluido desde `Index.html`).
-- Sin manifiesto `appsscript.json`: la configuración de la aplicación web se elige al
-  desplegar, y los permisos los detecta el editor a partir del código.
+- En `src/`, con el mismo nombre que tienen en el editor, cinco archivos de código: `Codigo.gs`
+  (servidor), `Datos.gs` (banco de preguntas e hitos de ejemplo), `Index.html`, `Estilos.html`
+  y `Cliente.html` (JavaScript del navegador, incluido desde `Index.html`), más el manifiesto.
+  `.clasp.json` (en `.gitignore`) sube solo `.gs`, `.html` y `.json` desde `src/`.
+- El manifiesto `src/appsscript.json` se copió tal cual del editor, sin inventarlo: zona horaria
+  `America/Santiago`, V8 y la aplicación web ejecutada como quien la despliega (`USER_DEPLOYING`)
+  con acceso `ANYONE`. Esos valores no se cambian sin decisión del usuario. Los permisos los
+  sigue detectando el editor a partir del código.
 - Las funciones puras (dupla de dos tutores, equipos de la dupla, validación del registro,
   semáforo de peor caso y `valor`, tablas de análisis, panel y semana ISO, armado del prompt,
   plantilla sin IA, cascada de modelos, estructura de la minuta, normalización de nombres) no tocan servicios de
@@ -148,3 +163,11 @@ Si cambian las columnas de esas pestañas, se actualiza la guía.
 
 `.md` con front-matter, plantilla en blanco descargable, identificadores deterministas, aviso de
 registros duplicados y envío de la rúbrica a Gemini.
+
+## Buzón con el arquitecto
+
+- El buzón de este proyecto es `C:\Users\ignac\Proyectos\impulsa-contexto\orquestacion\copiloto\`. El protocolo completo está en `C:\Users\ignac\Proyectos\impulsa-contexto\orquestacion\LEEME.md`; lo esencial está en esta sección.
+- Cuando el usuario escribe "sigue", lee `encargo.md`. Si su estado es "pendiente", cámbialo a "en curso" y ejecútalo con las reglas de este archivo. Los permisos de clasp se piden igual que siempre.
+- Al terminar o al quedar bloqueado, escribe `informe.md` con: número del encargo, estado (hecho o bloqueado), qué hiciste, archivos cambiados (y cuáles de `src/`), pruebas y su resultado, comandos ejecutados, pendientes y preguntas para el arquitecto. Agrega el mismo informe al final de `historial.md` y deja `encargo.md` en "hecho" o "bloqueado".
+- En el buzón no se escriben nombres de personas ni de estudiantes, correos, claves, IDs de planillas o scripts, ni nada de `datos/`.
+- Fuera de su buzón, Claude Code no escribe nada en `impulsa-contexto`.

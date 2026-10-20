@@ -13,7 +13,8 @@ node_modules/
 .env.*
 *.key
 
-# Configuracion de clasp, por si alguien la usa (este proyecto se instala a mano)
+# clasp: .clasp.json tiene el scriptId del proyecto de Impulsa (el codigo se sube con
+# clasp push, ver INSTALACION.md seccion 0) y la credencial de clasp nunca entra a git
 .clasp.json
 .clasprc.json
 
