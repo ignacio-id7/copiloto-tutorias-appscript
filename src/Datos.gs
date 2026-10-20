@@ -1,25 +1,10 @@
 // Datos sembrados por configurarPlanilla(). Después de sembrar, la planilla manda: editar
 // aquí no cambia lo que ya está en las pestañas (configurarPlanilla no pisa filas existentes).
 
-// Datos ficticios de ejemplo (backend/contenido/ejemplos/ de la versión anterior). Los
-// equipos e hitos reales del semestre los carga coordinación directamente en la planilla.
-var EQUIPOS_EJEMPLO = {
-  "semestre": "2026-2",
-  "equipos": [
-    {
-      "numero": 1,
-      "nombre": "Dron para obtencion de datos en mineria",
-      "curso": "EL6030"
-    },
-    {
-      "numero": 2,
-      "nombre": "Kits de robotica accesibles",
-      "curso": "EL4030",
-      "descripcion": "Kits de bajo costo para colegios"
-    }
-  ]
-};
-
+// Hitos ficticios de ejemplo (backend/contenido/ejemplos/ de la versión anterior).
+// configurarPlanilla los siembra solo si la pestaña Hitos está vacía; coordinación los
+// reemplaza a mano por los reales. Los tutores, las duplas y los equipos reales se importan
+// desde CSV directo en la planilla: nunca se escriben en el código.
 var HITOS_EJEMPLO = {
   "semestre": "2026-2",
   "hitos": [
@@ -123,5 +108,5 @@ var BANCO_PREGUNTAS = {
 };
 
 if (typeof module !== 'undefined') {
-  module.exports = { EQUIPOS_EJEMPLO: EQUIPOS_EJEMPLO, HITOS_EJEMPLO: HITOS_EJEMPLO, BANCO_PREGUNTAS: BANCO_PREGUNTAS };
+  module.exports = { HITOS_EJEMPLO: HITOS_EJEMPLO, BANCO_PREGUNTAS: BANCO_PREGUNTAS };
 }

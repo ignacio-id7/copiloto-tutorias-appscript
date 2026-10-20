@@ -105,10 +105,10 @@
   .marco { width: 100%; max-width: 80rem; margin: 0 auto; padding: var(--espacio-4); }
   .lateral { display: none; }
 
-  /* Avance del teléfono: "Paso N de 4" y cuatro tramos. */
+  /* Avance del teléfono: "Paso N de 6" y seis tramos. */
   .avance-movil { margin-bottom: var(--espacio-5); }
   .avance-movil__texto { font-size: var(--texto-sm); color: var(--color-texto-suave); margin-bottom: var(--espacio-2); }
-  .tramos { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--espacio-1); }
+  .tramos { display: grid; grid-template-columns: repeat(6, 1fr); gap: var(--espacio-1); }
   .tramo { height: 6px; border-radius: 3px; border: 1px solid var(--color-borde-fuerte); }
   .tramo--hecho { background: var(--color-acento); border-color: var(--color-acento); }
   .tramo--actual { background: var(--color-acento-claro); border-color: var(--color-acento-claro); height: 8px; box-shadow: var(--resplandor); }
@@ -139,6 +139,7 @@
   .pasos-lista__item--hecho .pasos-lista__marca { background: var(--color-acento); border-color: var(--color-acento); color: var(--color-sobre-acento); }
   .pasos-lista__item--actual { background: var(--color-superficie); border: 1px solid var(--color-borde); color: var(--color-texto); font-weight: 600; }
   .pasos-lista__item--actual .pasos-lista__marca { border-color: var(--color-acento-claro); color: var(--color-acento-claro); box-shadow: var(--resplandor); }
+  .pasos-lista__opcional { display: block; font-size: var(--texto-xs); font-weight: 400; color: var(--color-texto-tenue); }
 
   /* --- Tarjetas y campos ------------------------------------------------------------ */
   .tarjeta {
@@ -147,6 +148,13 @@
   }
   .rejilla-2 { display: grid; gap: var(--espacio-4); }
   @media (min-width: 48rem) { .rejilla-2 { grid-template-columns: 1fr 1fr; } }
+  .rejilla-2--siempre { gap: var(--espacio-3); margin-top: var(--espacio-2); }
+  @media (min-width: 30rem) { .rejilla-2--siempre { grid-template-columns: 1fr 1fr; } }
+  /* Consultas y compromisos: lado a lado solo con espacio de sobra. */
+  @media (min-width: 48rem) and (max-width: 79.99rem) { .rejilla-2--ancha { grid-template-columns: 1fr; } }
+  .rejilla-2--ancha { gap: var(--espacio-6); align-items: start; }
+  .tarjeta__titulo { margin: 0 0 var(--espacio-2); }
+  .separador { height: 1px; background: var(--color-borde); margin: var(--espacio-5) 0; }
 
   fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
   legend, .rotulo {
@@ -154,7 +162,8 @@
     color: var(--color-acento-texto); margin-bottom: var(--espacio-3); padding: 0;
   }
   .campo { display: flex; flex-direction: column; gap: var(--espacio-1); margin-bottom: var(--espacio-3); }
-  .campo label { font-size: var(--texto-sm); font-weight: 600; }
+  .campo label, .campo__rotulo { font-size: var(--texto-sm); font-weight: 600; }
+  .campo__rotulo { display: block; margin-bottom: var(--espacio-2); }
   .entrada, select.entrada, textarea.entrada {
     min-height: var(--alto-tactil-grande); padding: var(--espacio-3) var(--espacio-4);
     background: var(--color-fondo); border: 1.5px solid var(--color-borde-fuerte); border-radius: 10px;
@@ -163,6 +172,7 @@
   .entrada::placeholder { color: var(--color-texto-tenue); }
   .entrada:focus { border-color: var(--color-foco); outline: none; box-shadow: 0 0 0 3px rgba(63, 224, 211, 0.25); }
   textarea.entrada { min-height: 14rem; resize: vertical; line-height: var(--interlineado); }
+  textarea.entrada--corta { min-height: 4.5rem; }
   .texto-apoyo { font-size: var(--texto-xs); color: var(--color-texto-suave); }
 
   /* --- Botones (tres niveles) ------------------------------------------------------- */
@@ -179,6 +189,7 @@
   .boton--secundario:hover:not(:disabled) { background: rgba(0, 164, 153, 0.12); }
   .boton--neutro { background: transparent; border-color: var(--color-borde-fuerte); color: var(--color-texto); }
   .boton--neutro:hover:not(:disabled) { border-color: var(--color-texto-suave); }
+  .boton--chico { min-height: 36px; padding: var(--espacio-1) var(--espacio-4); font-size: var(--texto-sm); }
 
   .acciones {
     display: flex; flex-wrap: wrap; gap: var(--espacio-3); justify-content: space-between; align-items: center;
@@ -212,6 +223,36 @@
   }
   .chip[aria-pressed="true"] { border-color: var(--color-texto); background: rgba(255, 255, 255, 0.08); font-weight: 600; }
   .chip__fecha { color: var(--color-texto-suave); font-size: var(--texto-xs); margin-left: var(--espacio-1); }
+  .chip--fijo { display: inline-flex; align-items: center; gap: var(--espacio-2); cursor: default; padding-right: var(--espacio-1); }
+  .chip__quitar {
+    width: 32px; height: 32px; border-radius: 50%; border: 0; cursor: pointer;
+    background: transparent; color: var(--color-texto-suave);
+  }
+  .chip__quitar:hover { background: rgba(255, 255, 255, 0.08); color: var(--color-texto); }
+  .chips--agregados { margin-top: var(--espacio-3); }
+
+  .barra-dupla {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--espacio-3);
+    padding: var(--espacio-3) var(--espacio-4); margin-bottom: var(--espacio-4);
+    background: var(--color-superficie-solida); border: 1px solid var(--color-borde); border-radius: var(--radio);
+  }
+  .barra-dupla .rotulo { margin: 0 var(--espacio-2) 0 0; }
+
+  /* Integrantes presentes: casillas grandes, dos columnas en computador. */
+  .casillas { display: grid; gap: var(--espacio-2); }
+  @media (min-width: 40rem) { .casillas { grid-template-columns: 1fr 1fr; } }
+  .casilla {
+    display: flex; align-items: center; gap: var(--espacio-3); cursor: pointer;
+    min-height: var(--alto-tactil-grande); padding: var(--espacio-2) var(--espacio-4);
+    background: var(--color-fondo); border: 1.5px solid var(--color-borde-fuerte); border-radius: 10px;
+  }
+  .casilla:has(input:checked) { border-color: var(--color-texto); box-shadow: inset 0 0 0 1px var(--color-texto); font-weight: 600; }
+  .casilla input { width: 22px; height: 22px; accent-color: var(--color-acento); flex: none; margin: 0; }
+  .agregar-integrante__titulo { margin-top: var(--espacio-5); }
+  .agregar-integrante { display: grid; gap: var(--espacio-3); align-items: end; }
+  .agregar-integrante .campo { margin: 0; }
+  @media (min-width: 40rem) { .agregar-integrante { grid-template-columns: 1fr 1fr auto; } }
+  .agregar-integrante .boton { min-height: var(--alto-tactil-grande); }
 
   /* --- Paso 3: preguntas ------------------------------------------------------------ */
   .dimension { margin-bottom: var(--espacio-6); }
@@ -235,6 +276,15 @@
   .otro { display: grid; gap: var(--espacio-2); margin-top: var(--espacio-3); }
   .otro__fila { display: flex; gap: var(--espacio-2); align-items: center; }
   .otro__fila select { flex: 1; }
+  .nota { margin: var(--espacio-3) 0 0; }
+
+  /* --- Pasos 4 y 5: pares de texto libre ------------------------------------------- */
+  .seccion__titulo { font-size: var(--texto-md); font-weight: 600; margin-bottom: var(--espacio-4); }
+  .lista-pares { display: grid; gap: var(--espacio-4); justify-items: start; }
+  .lista-pares > .par { justify-self: stretch; }
+  .par { background: var(--color-superficie-solida); border: 1px solid var(--color-borde-fuerte); border-radius: var(--radio); padding: var(--espacio-4); }
+  .par__cabecera { display: flex; align-items: center; justify-content: space-between; gap: var(--espacio-3); margin-bottom: var(--espacio-2); }
+  .par__cabecera .rotulo { margin: 0; }
 
   /* Punto del semáforo con glifo: el estado no depende solo del color. */
   .punto {
@@ -249,7 +299,7 @@
   .punto--rojo::after { content: "✕"; }
   .punto--sin::after { content: "–"; color: var(--color-texto); }
 
-  /* --- Paso 4: semáforo y acta ------------------------------------------------------ */
+  /* --- Paso 6: semáforo y acta ------------------------------------------------------ */
   .semaforo { display: grid; gap: var(--espacio-3); grid-template-columns: 1fr; margin-bottom: var(--espacio-6); }
   @media (min-width: 40rem) { .semaforo { grid-template-columns: repeat(2, 1fr); } }
   @media (min-width: 80rem) { .semaforo { grid-template-columns: repeat(3, 1fr); } }

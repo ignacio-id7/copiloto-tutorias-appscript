@@ -2,13 +2,18 @@
   // JavaScript del navegador. Habla con Codigo.gs por google.script.run; el estado del
   // registro vive en `estado` y cada paso se dibuja de nuevo con pintar().
 
-  var PASOS = ['Quiénes', 'Equipo e hito', 'Preguntas', 'Semáforo y acta'];
+  var PASOS = ['Quiénes', 'Equipo e hito', 'Preguntas', 'Preguntas del tutor', 'Consultas y compromisos', 'Semáforo y acta'];
+  var PASO_ACTA = 6;
   var ETIQUETA_COLOR = { verde: 'Verde', amarillo: 'Amarillo', rojo: 'Rojo' };
+  var ETIQUETA_RESPONSABLE = { equipo: 'Equipo', tutores: 'Tutores' };
   var CLAVE_TUTORES = 'copiloto.tutores';
+  var OTRO_TUTOR = '__otro__';
   var MAXIMO_RESPUESTA_PROPIA = 300;
+  var MAXIMO_NOTA = 500;
+  var MAXIMO_TEXTO_LIBRE = 1000;
 
   var datos = null;
-  var estado = estadoInicial(leerTutoresRecordados());
+  var estado = null;
 
   function estadoInicial(tutores) {
     return {
@@ -18,7 +23,14 @@
       equipoNumero: null,
       hitoNumero: null,
       filtro: '',
+      verTodos: false,
+      presentes: [],
+      otrosIntegrantes: [],
+      nuevoIntegrante: { nombre: '', apellido: '' },
       respuestas: {},
+      preguntasTutor: [],
+      consultas: [],
+      compromisos: [],
       descartadas: 0,
       tutoriaId: null,
       semaforo: null,
@@ -50,18 +62,33 @@
     return (error && error.message ? error.message : String(error)).replace(/^Error:\s*/, '');
   }
 
-  function claveNombre(nombre, apellido) {
-    return (nombre + ' ' + apellido).replace(/\s+/g, ' ').trim().toLowerCase()
+  function claveNombre(texto) {
+    return String(texto || '').replace(/\s+/g, ' ').trim().toLowerCase()
       .normalize('NFD').replace(/[̀-ͯ]/g, '');
   }
 
+  function vacio(texto) {
+    return !String(texto || '').trim();
+  }
+
+  // --- Tutores ------------------------------------------------------------------------------
+
+  function tutorPorAlias(alias) {
+    return datos.tutores.filter(function (t) { return t.alias === alias; })[0] || null;
+  }
+
+  /** Lo recordado por este navegador, si los tutores siguen en la lista. */
   function leerTutoresRecordados() {
-    var vacio = { conduce: { nombre: '', apellido: '' }, registra: { nombre: '', apellido: '' } };
+    var limpio = function (eleccion) {
+      if (!eleccion) return { alias: '' };
+      if (eleccion.otro) return { otro: true, nombre: eleccion.nombre || '', apellido: eleccion.apellido || '' };
+      return { alias: eleccion.alias && tutorPorAlias(eleccion.alias) ? eleccion.alias : '' };
+    };
     try {
       var guardado = JSON.parse(localStorage.getItem(CLAVE_TUTORES) || 'null');
-      if (guardado && guardado.conduce && guardado.registra) return guardado;
+      if (guardado) return { conduce: limpio(guardado.conduce), registra: limpio(guardado.registra) };
     } catch (error) {}
-    return vacio;
+    return { conduce: { alias: '' }, registra: { alias: '' } };
   }
 
   function recordarTutores() {
@@ -69,6 +96,23 @@
       localStorage.setItem(CLAVE_TUTORES, JSON.stringify({ conduce: estado.conduce, registra: estado.registra }));
     } catch (error) {}
   }
+
+  function nombreDeEleccion(eleccion) {
+    if (eleccion.otro) return (eleccion.nombre + ' ' + eleccion.apellido).replace(/\s+/g, ' ').trim();
+    var tutor = tutorPorAlias(eleccion.alias);
+    return tutor ? tutor.nombre : '';
+  }
+
+  /** La dupla registrada de los dos tutores elegidos, o null. */
+  function duplaDeLosTutores() {
+    if (estado.conduce.otro || estado.registra.otro) return null;
+    var a = tutorPorAlias(estado.conduce.alias);
+    var b = tutorPorAlias(estado.registra.alias);
+    if (!a || !b) return null;
+    return datos.duplasPorPar[[a.clave, b.clave].sort().join('|')] || null;
+  }
+
+  // --- Equipo, hito y guion -----------------------------------------------------------------
 
   function equipoElegido() {
     return datos.equipos.filter(function (e) { return e.numero === estado.equipoNumero; })[0] || null;
@@ -94,13 +138,6 @@
     return r.otro ? Boolean(r.texto.trim() && r.color) : true;
   }
 
-  function colorDe(pregunta) {
-    var r = estado.respuestas[pregunta.clave];
-    if (!r) return '';
-    if (r.otro) return r.color;
-    return pregunta.alternativas[r.indice] ? pregunta.alternativas[r.indice].color : '';
-  }
-
   function aprobada() {
     return estado.fase === 'aprobada';
   }
@@ -112,9 +149,10 @@
       var numero = i + 1;
       var clase = numero < estado.paso ? 'hecho' : numero === estado.paso ? 'actual' : 'pendiente';
       var marca = numero < estado.paso ? '✓' : String(numero);
+      var opcional = numero === 4 || numero === 5 ? '<span class="pasos-lista__opcional">Opcional</span>' : '';
       return '<li class="pasos-lista__item pasos-lista__item--' + clase + '"' +
         (numero === estado.paso ? ' aria-current="step"' : '') + '>' +
-        '<span class="pasos-lista__marca" aria-hidden="true">' + marca + '</span>' + escapar(nombre) + '</li>';
+        '<span class="pasos-lista__marca" aria-hidden="true">' + marca + '</span><span>' + escapar(nombre) + opcional + '</span></li>';
     }).join('');
     document.getElementById('avance-texto').textContent =
       'Paso ' + estado.paso + ' de ' + PASOS.length + ' · ' + PASOS[estado.paso - 1];
@@ -136,7 +174,7 @@
   function pintar() {
     pintarNavegacion();
     var contenido = document.getElementById('contenido');
-    contenido.innerHTML = [null, htmlPaso1, htmlPaso2, htmlPaso3, htmlPaso4][estado.paso]();
+    contenido.innerHTML = [null, htmlPaso1, htmlPaso2, htmlPaso3, htmlPaso4, htmlPaso5, htmlPaso6][estado.paso]();
     if (estado.paso === 2) pintarEquipos();
     if (estado.paso === 3) actualizarCuentas();
   }
@@ -148,57 +186,127 @@
   // --- Paso 1: quiénes ----------------------------------------------------------------------
 
   function htmlTutor(rol, titulo) {
-    var t = estado[rol];
-    return '<fieldset class="tarjeta"><legend>' + titulo + '</legend>' +
-      '<div class="campo"><label for="' + rol + '-nombre">Nombre</label>' +
-      '<input class="entrada" id="' + rol + '-nombre" data-rol="' + rol + '" data-parte="nombre" autocomplete="off" maxlength="120" value="' + escapar(t.nombre) + '"></div>' +
-      '<div class="campo"><label for="' + rol + '-apellido">Apellido</label>' +
-      '<input class="entrada" id="' + rol + '-apellido" data-rol="' + rol + '" data-parte="apellido" autocomplete="off" maxlength="120" value="' + escapar(t.apellido) + '"></div>' +
-      '</fieldset>';
+    var eleccion = estado[rol];
+    var valor = eleccion.otro ? OTRO_TUTOR : eleccion.alias;
+    var html = '<div class="tarjeta"><div class="campo"><label class="rotulo" for="' + rol + '-tutor">' + titulo + '</label>' +
+      '<select class="entrada" id="' + rol + '-tutor" data-tutor="' + rol + '">' +
+      '<option value=""' + (valor ? '' : ' selected') + '>Elige un tutor</option>' +
+      datos.tutores.map(function (t) {
+        return '<option value="' + escapar(t.alias) + '"' + (valor === t.alias ? ' selected' : '') + '>' + escapar(t.nombre) + '</option>';
+      }).join('') +
+      '<option value="' + OTRO_TUTOR + '"' + (valor === OTRO_TUTOR ? ' selected' : '') + '>No está en la lista</option>' +
+      '</select></div>';
+    if (eleccion.otro) {
+      html += '<div class="rejilla-2 rejilla-2--siempre">' +
+        '<div class="campo"><label for="' + rol + '-nombre">Nombre</label>' +
+        '<input class="entrada" id="' + rol + '-nombre" data-rol="' + rol + '" data-parte="nombre" autocomplete="off" maxlength="120" value="' + escapar(eleccion.nombre) + '"></div>' +
+        '<div class="campo"><label for="' + rol + '-apellido">Apellido</label>' +
+        '<input class="entrada" id="' + rol + '-apellido" data-rol="' + rol + '" data-parte="apellido" autocomplete="off" maxlength="120" value="' + escapar(eleccion.apellido) + '"></div></div>';
+    }
+    return html + '</div>';
   }
 
   function htmlPaso1() {
-    return '<form id="form-paso1" novalidate>' +
+    var html = '<form id="form-paso1" novalidate>' +
       '<h1 class="paso__titulo">¿Quiénes hacen la tutoría?</h1>' +
-      '<p class="paso__ayuda">Nombre y apellido de cada tutor; este navegador los recuerda para la próxima vez</p>' +
-      '<div class="rejilla-2">' + htmlTutor('conduce', 'Conduce la reunión') + htmlTutor('registra', 'Toma notas') + '</div>' +
+      '<p class="paso__ayuda">Elige a los dos tutores; este navegador los recuerda para la próxima vez</p>';
+    if (!datos.tutores.length) {
+      html += '<div class="aviso aviso--info">La pestaña Tutores de la planilla está vacía. Puedes escribir los nombres a mano con "No está en la lista".</div>';
+    }
+    return html + '<div class="rejilla-2">' + htmlTutor('conduce', 'Conduce la reunión') + htmlTutor('registra', 'Toma notas') + '</div>' +
       htmlError() +
       '<div class="acciones"><span></span><button type="submit" class="boton boton--primario">Siguiente</button></div>' +
       '</form>';
   }
 
   function validarPaso1() {
-    var faltan = ['conduce', 'registra'].some(function (rol) {
-      return !estado[rol].nombre.trim() || !estado[rol].apellido.trim();
-    });
-    if (faltan) return 'Completa nombre y apellido de los dos tutores.';
-    if (claveNombre(estado.conduce.nombre, estado.conduce.apellido) ===
-        claveNombre(estado.registra.nombre, estado.registra.apellido)) {
-      return 'Quien conduce y quien toma notas deben ser personas distintas.';
+    var roles = ['conduce', 'registra'];
+    for (var i = 0; i < roles.length; i++) {
+      var eleccion = estado[roles[i]];
+      if (eleccion.otro ? vacio(eleccion.nombre) || vacio(eleccion.apellido) : !eleccion.alias) {
+        return 'Elige a los dos tutores (o escribe nombre y apellido si no están en la lista).';
+      }
     }
-    return '';
+    var mismo = !estado.conduce.otro && !estado.registra.otro
+      ? estado.conduce.alias === estado.registra.alias
+      : claveNombre(nombreDeEleccion(estado.conduce)) === claveNombre(nombreDeEleccion(estado.registra));
+    return mismo ? 'Quien conduce y quien toma notas deben ser personas distintas.' : '';
   }
 
-  // --- Paso 2: equipo e hito ----------------------------------------------------------------
+  // --- Paso 2: equipo, hito e integrantes ---------------------------------------------------
+
+  function equiposVisibles() {
+    var dupla = duplaDeLosTutores();
+    var base = dupla && !estado.verTodos
+      ? datos.equipos.filter(function (e) { return dupla.equipos.indexOf(e.numero) !== -1; })
+      : datos.equipos;
+    var filtro = estado.filtro.trim().toLowerCase();
+    return base.filter(function (e) {
+      return !filtro || String(e.numero) === filtro || (e.numero + ' ' + e.nombre + ' ' + e.curso).toLowerCase().indexOf(filtro) !== -1;
+    });
+  }
+
+  function htmlDupla() {
+    var dupla = duplaDeLosTutores();
+    if (!dupla) {
+      return '<div class="aviso aviso--info">' + escapar(nombreDeEleccion(estado.conduce)) + ' y ' +
+        escapar(nombreDeEleccion(estado.registra)) + ' no forman una dupla registrada en la pestaña Duplas: se muestran todos los equipos.</div>';
+    }
+    return '<div class="barra-dupla"><span><span class="rotulo">Dupla</span><strong>' + escapar(dupla.dupla) + '</strong>' +
+      (estado.verTodos ? ' · todos los equipos' : ' · ' + dupla.equipos.length + ' equipo(s)') + '</span>' +
+      '<button type="button" class="boton boton--neutro boton--chico" id="ver-todos">' +
+      (estado.verTodos ? 'Ver solo los de la dupla' : 'Ver todos los equipos') + '</button></div>';
+  }
+
+  function htmlIntegrantes(equipo) {
+    var html = '<span class="rotulo">Integrantes presentes</span>';
+    if (equipo.integrantes.length) {
+      html += '<div class="casillas">' + equipo.integrantes.map(function (nombre, i) {
+        var marcado = estado.presentes.indexOf(nombre) !== -1;
+        return '<label class="casilla"><input type="checkbox" data-integrante="' + i + '"' + (marcado ? ' checked' : '') + '><span>' + escapar(nombre) + '</span></label>';
+      }).join('') + '</div>';
+    } else {
+      html += '<p class="texto-apoyo">La pestaña Equipos no tiene integrantes para este equipo. Agrégalos abajo.</p>';
+    }
+    if (estado.otrosIntegrantes.length) {
+      html += '<div class="chips chips--agregados">' + estado.otrosIntegrantes.map(function (otro, i) {
+        return '<span class="chip chip--fijo">' + escapar(otro.nombre + ' ' + otro.apellido) +
+          '<button type="button" class="chip__quitar" data-quitar-integrante="' + i + '" aria-label="Quitar a ' + escapar(otro.nombre + ' ' + otro.apellido) + '">✕</button></span>';
+      }).join('') + '</div>';
+    }
+    return html + '<span class="campo__rotulo agregar-integrante__titulo">Agregar otro (no está en la lista)</span>' +
+      '<div class="agregar-integrante">' +
+      '<div class="campo"><label for="nuevo-nombre">Nombre</label>' +
+      '<input class="entrada" id="nuevo-nombre" data-nuevo="nombre" autocomplete="off" maxlength="120" value="' + escapar(estado.nuevoIntegrante.nombre) + '"></div>' +
+      '<div class="campo"><label for="nuevo-apellido">Apellido</label>' +
+      '<input class="entrada" id="nuevo-apellido" data-nuevo="apellido" autocomplete="off" maxlength="120" value="' + escapar(estado.nuevoIntegrante.apellido) + '"></div>' +
+      '<button type="button" class="boton boton--secundario" id="agregar-integrante">Agregar</button></div>';
+  }
 
   function htmlPaso2() {
     var equipo = equipoElegido();
     var html = '<h1 class="paso__titulo">¿Qué equipo y qué hito?</h1>' +
-      '<p class="paso__ayuda">Los equipos y los hitos salen de la planilla de Impulsa</p>' +
+      '<p class="paso__ayuda">Los equipos, los hitos y los integrantes salen de la planilla de Impulsa</p>' +
+      htmlDupla() +
       '<div class="campo"><label for="filtro-equipos">Buscar equipo</label>' +
       '<input class="entrada" id="filtro-equipos" type="search" placeholder="Número o nombre del proyecto" value="' + escapar(estado.filtro) + '"></div>' +
       '<div class="equipos" id="equipos" role="group" aria-label="Equipos"></div>';
     if (equipo) {
+      var dupla = duplaDeLosTutores();
+      var deOtraDupla = dupla && equipo.dupla && claveNombre(equipo.dupla) !== claveNombre(dupla.dupla);
       html += '<div class="tarjeta"><span class="rotulo">Equipo ' + equipo.numero + '</span>' +
-        '<p style="margin:0 0 var(--espacio-4)"><strong>' + escapar(equipo.nombre) + '</strong> · ' + escapar(equipo.curso) + '</p>' +
+        '<p class="tarjeta__titulo"><strong>' + escapar(equipo.nombre) + '</strong> · ' + escapar(equipo.curso) +
+        (equipo.dupla ? ' · dupla ' + escapar(equipo.dupla) : '') + '</p>' +
+        (deOtraDupla ? '<p class="texto-apoyo">Este equipo es de otra dupla: la tutoría queda registrada con la dupla del equipo.</p>' : '') +
         '<span class="rotulo">Hito en curso</span><div class="chips" role="group" aria-label="Hito">' +
         hitosDelEquipo(equipo).map(function (h) {
           return '<button type="button" class="chip" data-hito="' + h.numero + '" aria-pressed="' + (h.numero === estado.hitoNumero) + '">' +
             escapar(h.nombre) + (h.fecha ? '<span class="chip__fecha">' + escapar(h.fecha) + '</span>' : '') + '</button>';
-        }).join('') + '</div></div>';
+        }).join('') + '</div>' +
+        '<div class="separador"></div>' + htmlIntegrantes(equipo) + '</div>';
     }
     if (estado.tutoriaId && !aprobada()) {
-      html += '<div class="aviso aviso--info">Esta tutoría ya está guardada. Si cambias equipo o hito, al guardar de nuevo se reemplaza la misma fila de la planilla.</div>';
+      html += '<div class="aviso aviso--info">Esta tutoría ya está guardada. Si cambias algo, al guardar de nuevo se reemplaza la misma fila de la planilla.</div>';
     }
     return html + htmlError() +
       '<div class="acciones"><button type="button" class="boton boton--neutro" data-ir="1">Atrás</button>' +
@@ -206,29 +314,43 @@
   }
 
   function pintarEquipos() {
-    var filtro = estado.filtro.trim().toLowerCase();
-    var visibles = datos.equipos.filter(function (e) {
-      return !filtro || String(e.numero) === filtro || (e.numero + ' ' + e.nombre + ' ' + e.curso).toLowerCase().indexOf(filtro) !== -1;
-    });
     var contenedor = document.getElementById('equipos');
     if (!datos.equipos.length) {
-      contenedor.innerHTML = '<div class="aviso aviso--info">La pestaña Equipos de la planilla está vacía.</div>';
+      contenedor.innerHTML = '<div class="aviso aviso--info">La pestaña Equipos de la planilla no tiene equipos activos.</div>';
       return;
     }
+    var visibles = equiposVisibles();
     contenedor.innerHTML = visibles.length ? visibles.map(function (e) {
       return '<button type="button" class="opcion-equipo" data-equipo="' + e.numero + '" aria-pressed="' + (e.numero === estado.equipoNumero) + '">' +
         '<span class="opcion-equipo__numero">Equipo ' + e.numero + '</span><span>' + escapar(e.nombre) + '</span>' +
-        '<span class="opcion-equipo__curso">' + escapar(e.curso) + '</span></button>';
+        '<span class="opcion-equipo__curso">' + escapar(e.curso) + (e.dupla ? ' · ' + escapar(e.dupla) : '') + '</span></button>';
     }).join('') : '<p class="texto-apoyo">Ningún equipo coincide con la búsqueda.</p>';
   }
 
   function elegirEquipo(numero) {
+    if (numero !== estado.equipoNumero) {
+      estado.presentes = [];
+      estado.otrosIntegrantes = [];
+    }
     estado.equipoNumero = numero;
     var equipo = equipoElegido();
-    var hitos = hitosDelEquipo(equipo);
-    var vigente = hitos.some(function (h) { return h.numero === estado.hitoNumero; });
+    var vigente = hitosDelEquipo(equipo).some(function (h) { return h.numero === estado.hitoNumero; });
     if (!vigente) estado.hitoNumero = datos.hitosPorCurso[equipo.curso] ? datos.hitosPorCurso[equipo.curso].sugerido : null;
     pintar();
+  }
+
+  function agregarIntegrante() {
+    var nuevo = estado.nuevoIntegrante;
+    if (vacio(nuevo.nombre) || vacio(nuevo.apellido)) {
+      estado.error = 'Escribe nombre y apellido del integrante que quieres agregar.';
+      pintar();
+      return;
+    }
+    estado.otrosIntegrantes.push({ nombre: nuevo.nombre.trim(), apellido: nuevo.apellido.trim() });
+    estado.nuevoIntegrante = { nombre: '', apellido: '' };
+    estado.error = '';
+    pintar();
+    document.getElementById('nuevo-nombre').focus();
   }
 
   /** Al pasar al paso 3, se quitan las respuestas que no están en el guion nuevo. */
@@ -248,15 +370,16 @@
 
   function htmlPregunta(pregunta) {
     var r = estado.respuestas[pregunta.clave];
+    var bloqueo = aprobada() ? ' disabled' : '';
     var html = '<article class="pregunta" id="pregunta-' + escapar(pregunta.clave) + '">' +
       '<p class="pregunta__texto">' + escapar(pregunta.texto) + '</p><div class="alternativas">';
     pregunta.alternativas.forEach(function (alternativa, indice) {
       var elegida = r && !r.otro && r.indice === indice;
-      html += '<button type="button" class="alternativa" data-clave="' + escapar(pregunta.clave) + '" data-indice="' + indice + '" aria-pressed="' + elegida + '"' + (aprobada() ? ' disabled' : '') + '>' +
+      html += '<button type="button" class="alternativa" data-clave="' + escapar(pregunta.clave) + '" data-indice="' + indice + '" aria-pressed="' + elegida + '"' + bloqueo + '>' +
         '<span class="punto punto--' + alternativa.color + '" aria-hidden="true"></span>' +
         '<span>' + escapar(alternativa.texto) + '<span class="texto-apoyo"> · ' + ETIQUETA_COLOR[alternativa.color] + '</span></span></button>';
     });
-    html += '<button type="button" class="alternativa alternativa--otro" data-clave="' + escapar(pregunta.clave) + '" data-otro="1" aria-pressed="' + Boolean(r && r.otro) + '"' + (aprobada() ? ' disabled' : '') + '>' +
+    html += '<button type="button" class="alternativa alternativa--otro" data-clave="' + escapar(pregunta.clave) + '" data-otro="1" aria-pressed="' + Boolean(r && r.otro) + '"' + bloqueo + '>' +
       '<span class="punto punto--sin" aria-hidden="true"></span><span>Otro</span></button></div>';
     if (r && r.otro) {
       var id = 'otro-' + pregunta.clave;
@@ -269,6 +392,11 @@
           return '<option value="' + c + '"' + (r.color === c ? ' selected' : '') + '>' + ETIQUETA_COLOR[c] + '</option>';
         }).join('') + '</select></div>' +
         '<span class="texto-apoyo">Con texto y color la pregunta queda respondida</span></div>';
+    }
+    if (r) {
+      var idNota = 'nota-' + pregunta.clave;
+      html += '<div class="campo nota"><label for="' + escapar(idNota) + '">Observación <span class="texto-apoyo">(opcional)</span></label>' +
+        '<textarea class="entrada entrada--corta" id="' + escapar(idNota) + '" data-nota="' + escapar(pregunta.clave) + '" rows="2" maxlength="' + MAXIMO_NOTA + '">' + escapar(r.nota || '') + '</textarea></div>';
     }
     return html + '</article>';
   }
@@ -284,7 +412,7 @@
       html += '<div class="aviso aviso--info">Se quitaron ' + estado.descartadas + ' respuesta(s) que no están en el guion de este equipo e hito.</div>';
     }
     if (!preguntas.length) {
-      html += '<div class="aviso aviso--info">La pestaña Preguntas no tiene preguntas activas para ' + escapar(equipo.curso) + ' en ' + escapar(hito.nombre) + '. Puedes guardar la tutoría igual.</div>';
+      html += '<div class="aviso aviso--info">La pestaña Preguntas no tiene preguntas activas para ' + escapar(equipo.curso) + ' en ' + escapar(hito.nombre) + '. Puedes seguir igual.</div>';
     }
     datos.dimensiones.forEach(function (dimension) {
       var deLaDimension = preguntas.filter(function (p) { return p.dimension === dimension.codigo; });
@@ -297,7 +425,7 @@
     return html + htmlError() +
       '<div class="acciones acciones--fijas"><button type="button" class="boton boton--neutro" data-ir="2">Atrás</button>' +
       '<span class="acciones__estado" id="cuenta-total" aria-live="polite"></span>' +
-      '<button type="button" class="boton boton--primario" id="guardar">Guardar tutoría</button></div>';
+      '<button type="button" class="boton boton--primario" data-ir="4">Siguiente</button></div>';
   }
 
   function actualizarCuentas() {
@@ -324,20 +452,105 @@
     actualizarCuentas();
   }
 
+  // --- Pasos 4 y 5: listas de texto libre ---------------------------------------------------
+
+  // Cada lista: campos que la forman, rótulos y cómo se llama un elemento.
+  var LISTAS = {
+    preguntasTutor: {
+      nuevo: function () { return { pregunta: '', respuesta: '' }; },
+      campos: [['pregunta', 'Pregunta del tutor'], ['respuesta', 'Respuesta del equipo (puede quedar vacía)']],
+      titulo: 'Pregunta', agregar: 'Agregar pregunta'
+    },
+    consultas: {
+      nuevo: function () { return { preguntaEquipo: '', respuestaTutor: '' }; },
+      campos: [['preguntaEquipo', 'Consulta del equipo'], ['respuestaTutor', 'Respuesta del tutor (puede quedar vacía)']],
+      titulo: 'Consulta', agregar: 'Agregar consulta'
+    }
+  };
+
+  function htmlLista(nombre) {
+    var lista = LISTAS[nombre];
+    var html = estado[nombre].map(function (elemento, i) {
+      return '<div class="par"><div class="par__cabecera"><span class="rotulo">' + lista.titulo + ' ' + (i + 1) + '</span>' +
+        '<button type="button" class="boton boton--neutro boton--chico" data-quitar="' + nombre + '" data-indice="' + i + '">Quitar</button></div>' +
+        lista.campos.map(function (campo) {
+          var id = nombre + '-' + i + '-' + campo[0];
+          return '<div class="campo"><label for="' + id + '">' + campo[1] + '</label>' +
+            '<textarea class="entrada entrada--corta" id="' + id + '" rows="2" maxlength="' + MAXIMO_TEXTO_LIBRE + '" data-lista="' + nombre + '" data-indice="' + i + '" data-campo="' + campo[0] + '">' +
+            escapar(elemento[campo[0]]) + '</textarea></div>';
+        }).join('') + '</div>';
+    }).join('');
+    return html + '<button type="button" class="boton boton--secundario" data-agregar="' + nombre + '">+ ' + lista.agregar + '</button>';
+  }
+
+  function htmlCompromisos() {
+    var html = estado.compromisos.map(function (compromiso, i) {
+      var id = 'compromiso-' + i;
+      return '<div class="par"><div class="par__cabecera"><span class="rotulo">Compromiso ' + (i + 1) + '</span>' +
+        '<button type="button" class="boton boton--neutro boton--chico" data-quitar="compromisos" data-indice="' + i + '">Quitar</button></div>' +
+        '<div class="campo"><label for="' + id + '">Descripción</label>' +
+        '<input class="entrada" id="' + id + '" maxlength="' + MAXIMO_TEXTO_LIBRE + '" data-lista="compromisos" data-indice="' + i + '" data-campo="descripcion" value="' + escapar(compromiso.descripcion) + '"></div>' +
+        '<span class="campo__rotulo" id="' + id + '-responsable">Responsable</span>' +
+        '<div class="chips" role="group" aria-labelledby="' + id + '-responsable">' +
+        ['equipo', 'tutores'].map(function (valor) {
+          return '<button type="button" class="chip" data-responsable="' + i + '" data-valor="' + valor + '" aria-pressed="' + (compromiso.responsable === valor) + '">' + ETIQUETA_RESPONSABLE[valor] + '</button>';
+        }).join('') + '</div></div>';
+    }).join('');
+    if (estado.compromisos.length < datos.maximoCompromisos) {
+      html += '<button type="button" class="boton boton--secundario" data-agregar="compromisos">+ Agregar compromiso</button>';
+    } else {
+      html += '<p class="texto-apoyo">Máximo ' + datos.maximoCompromisos + ' compromisos.</p>';
+    }
+    return html;
+  }
+
+  function htmlPaso4() {
+    var vacia = !estado.preguntasTutor.length;
+    return '<h1 class="paso__titulo">¿Qué más preguntaron?</h1>' +
+      '<p class="paso__ayuda">Opcional. Preguntas que hicieron fuera del guion y lo que respondió el equipo</p>' +
+      '<div class="lista-pares">' + htmlLista('preguntasTutor') + '</div>' + htmlError() +
+      '<div class="acciones"><button type="button" class="boton boton--neutro" data-ir="3">Atrás</button>' +
+      '<button type="button" class="boton ' + (vacia ? 'boton--secundario' : 'boton--primario') + '" data-ir="5">' + (vacia ? 'Omitir este paso' : 'Siguiente') + '</button></div>';
+  }
+
+  function htmlPaso5() {
+    var vacio = !estado.consultas.length && !estado.compromisos.length;
+    var etiqueta = vacio ? 'Omitir y guardar' : estado.tutoriaId ? 'Guardar cambios' : 'Guardar tutoría';
+    return '<h1 class="paso__titulo">Consultas y compromisos</h1>' +
+      '<p class="paso__ayuda">Opcional. Lo que preguntó el equipo y lo que quedó acordado para la próxima reunión</p>' +
+      '<div class="rejilla-2 rejilla-2--ancha">' +
+      '<section aria-labelledby="titulo-consultas"><h2 class="seccion__titulo" id="titulo-consultas">Consultas del equipo</h2><div class="lista-pares">' + htmlLista('consultas') + '</div></section>' +
+      '<section aria-labelledby="titulo-compromisos"><h2 class="seccion__titulo" id="titulo-compromisos">Compromisos</h2><div class="lista-pares">' + htmlCompromisos() + '</div></section>' +
+      '</div>' + htmlError() +
+      '<div class="acciones"><button type="button" class="boton boton--neutro" data-ir="4">Atrás</button>' +
+      '<button type="button" class="boton boton--primario" id="guardar">' + etiqueta + '</button></div>';
+  }
+
+  // --- Guardar ------------------------------------------------------------------------------
+
   function entradaParaGuardar() {
     var respuestas = {};
     guion().forEach(function (p) {
       if (!respondida(p.clave)) return;
       var r = estado.respuestas[p.clave];
-      respuestas[p.clave] = r.otro ? { otro: true, texto: r.texto, color: r.color } : { indice: r.indice };
+      respuestas[p.clave] = r.otro
+        ? { otro: true, texto: r.texto, color: r.color, nota: r.nota || '' }
+        : { indice: r.indice, nota: r.nota || '' };
     });
+    var tutor = function (eleccion) {
+      return eleccion.otro ? { nombre: eleccion.nombre, apellido: eleccion.apellido } : { alias: eleccion.alias };
+    };
     return {
       id: estado.tutoriaId,
-      conduce: estado.conduce,
-      registra: estado.registra,
+      conduce: tutor(estado.conduce),
+      registra: tutor(estado.registra),
       equipoNumero: estado.equipoNumero,
       hitoNumero: estado.hitoNumero,
-      respuestas: respuestas
+      integrantes: { lista: estado.presentes, otros: estado.otrosIntegrantes },
+      respuestas: respuestas,
+      preguntasTutor: estado.preguntasTutor,
+      consultas: estado.consultas,
+      compromisos: estado.compromisos
     };
   }
 
@@ -348,18 +561,18 @@
     llamar('guardarTutoria', entradaParaGuardar()).then(function (resultado) {
       estado.tutoriaId = resultado.id;
       estado.semaforo = resultado.semaforo;
-      // Respuestas nuevas: el borrador de acta anterior, si había, ya no corresponde.
+      // Registro nuevo: el borrador de acta anterior, si había, ya no corresponde.
       estado.acta = null;
       estado.fase = 'inicio';
       estado.observaciones = '';
-      irA(4);
+      irA(PASO_ACTA);
     }).catch(function (error) {
       estado.error = 'No se pudo guardar: ' + mensajeDe(error);
       pintar();
     });
   }
 
-  // --- Paso 4: semáforo y acta --------------------------------------------------------------
+  // --- Paso 6: semáforo y acta --------------------------------------------------------------
 
   function htmlSemaforo() {
     return '<div class="semaforo">' + datos.dimensiones.map(function (dimension) {
@@ -405,7 +618,7 @@
       : 'Gemini no respondió (o falta la clave), así que el texto salió de la plantilla sin IA. Revísalo antes de aprobar.';
   }
 
-  function htmlPaso4() {
+  function htmlPaso6() {
     var equipo = equipoElegido();
     var html = '<h1 class="paso__titulo">Semáforo y acta</h1>' +
       '<p class="paso__ayuda">Equipo ' + equipo.numero + ' · ' + escapar(hitoElegido().nombre) + '. La tutoría quedó guardada en la planilla</p>' +
@@ -415,7 +628,7 @@
       html += '<div class="tarjeta"><span class="rotulo">Acta</span>' +
         '<p style="margin-top:0">Gemini redacta las observaciones generales a partir de lo registrado. Tú las revisas, las editas si quieres y apruebas el acta.</p>' +
         htmlError() +
-        '<div class="acciones"><button type="button" class="boton boton--neutro" data-ir="3">Corregir respuestas</button>' +
+        '<div class="acciones"><button type="button" class="boton boton--neutro" data-ir="3">Corregir registro</button>' +
         '<button type="button" class="boton boton--primario" id="generar">Generar acta</button></div></div>';
       return html;
     }
@@ -439,7 +652,7 @@
         '<span class="marca-modelo">' + htmlOrigenTexto() + '</span></div>' +
         htmlError() +
         (ocupado ? '<div class="cargando" role="status"><span class="giro"></span>Creando el documento...</div>' :
-        '<div class="acciones"><button type="button" class="boton boton--neutro" data-ir="3">Corregir respuestas</button>' +
+        '<div class="acciones"><button type="button" class="boton boton--neutro" data-ir="3">Corregir registro</button>' +
         '<span style="display:flex;gap:var(--espacio-3);flex-wrap:wrap">' +
         '<button type="button" class="boton boton--secundario" id="generar">Volver a generar</button>' +
         '<button type="button" class="boton boton--primario" id="aprobar">Aprobar acta</button></span></div>');
@@ -532,14 +745,21 @@
 
   contenido.addEventListener('input', function (evento) {
     var objetivo = evento.target;
-    if (objetivo.dataset.rol) {
-      estado[objetivo.dataset.rol][objetivo.dataset.parte] = objetivo.value;
+    var d = objetivo.dataset;
+    if (d.rol) {
+      estado[d.rol][d.parte] = objetivo.value;
     } else if (objetivo.id === 'filtro-equipos') {
       estado.filtro = objetivo.value;
       pintarEquipos();
-    } else if (objetivo.dataset.otroTexto) {
-      estado.respuestas[objetivo.dataset.otroTexto].texto = objetivo.value;
+    } else if (d.nuevo) {
+      estado.nuevoIntegrante[d.nuevo] = objetivo.value;
+    } else if (d.otroTexto) {
+      estado.respuestas[d.otroTexto].texto = objetivo.value;
       actualizarCuentas();
+    } else if (d.nota) {
+      estado.respuestas[d.nota].nota = objetivo.value;
+    } else if (d.lista) {
+      estado[d.lista][Number(d.indice)][d.campo] = objetivo.value;
     } else if (objetivo.id === 'observaciones') {
       estado.observaciones = objetivo.value;
       var vista = document.getElementById('vista-observaciones');
@@ -551,42 +771,82 @@
   });
 
   contenido.addEventListener('change', function (evento) {
-    var clave = evento.target.dataset.otroColor;
-    if (!clave) return;
-    estado.respuestas[clave].color = evento.target.value;
-    var punto = document.querySelector('[data-otro-punto="' + CSS.escape(clave) + '"]');
-    if (punto) punto.className = 'punto punto--' + (evento.target.value || 'sin');
-    actualizarCuentas();
+    var objetivo = evento.target;
+    var d = objetivo.dataset;
+    if (d.tutor) {
+      estado[d.tutor] = objetivo.value === OTRO_TUTOR ? { otro: true, nombre: '', apellido: '' } : { alias: objetivo.value };
+      estado.verTodos = false;
+      pintar();
+      if (objetivo.value === OTRO_TUTOR) document.getElementById(d.tutor + '-nombre').focus();
+    } else if (d.integrante !== undefined) {
+      var nombre = equipoElegido().integrantes[Number(d.integrante)];
+      estado.presentes = estado.presentes.filter(function (n) { return n !== nombre; });
+      if (objetivo.checked) estado.presentes.push(nombre);
+    } else if (d.otroColor) {
+      estado.respuestas[d.otroColor].color = objetivo.value;
+      var punto = document.querySelector('[data-otro-punto="' + CSS.escape(d.otroColor) + '"]');
+      if (punto) punto.className = 'punto punto--' + (objetivo.value || 'sin');
+      actualizarCuentas();
+    }
+  });
+
+  contenido.addEventListener('keydown', function (evento) {
+    if (evento.key === 'Enter' && evento.target.dataset.nuevo) {
+      evento.preventDefault();
+      agregarIntegrante();
+    }
   });
 
   contenido.addEventListener('click', function (evento) {
     var boton = evento.target.closest('button, [data-ir]');
     if (!boton || boton.disabled) return;
-    if (boton.dataset.ir) {
-      irA(Number(boton.dataset.ir));
-    } else if (boton.dataset.equipo) {
-      elegirEquipo(Number(boton.dataset.equipo));
-    } else if (boton.dataset.hito) {
-      estado.hitoNumero = Number(boton.dataset.hito);
+    var d = boton.dataset;
+    if (d.ir) {
+      irA(Number(d.ir));
+    } else if (boton.id === 'ver-todos') {
+      estado.verTodos = !estado.verTodos;
+      pintar();
+    } else if (d.equipo) {
+      elegirEquipo(Number(d.equipo));
+    } else if (d.hito) {
+      estado.hitoNumero = Number(d.hito);
+      pintar();
+    } else if (boton.id === 'agregar-integrante') {
+      agregarIntegrante();
+    } else if (d.quitarIntegrante !== undefined) {
+      estado.otrosIntegrantes.splice(Number(d.quitarIntegrante), 1);
       pintar();
     } else if (boton.id === 'siguiente-2') {
       ajustarRespuestasAlGuion();
       irA(3);
-    } else if (boton.dataset.clave) {
-      var clave = boton.dataset.clave;
+    } else if (d.clave) {
+      var clave = d.clave;
       var actual = estado.respuestas[clave];
-      if (boton.dataset.otro) {
-        if (!actual || !actual.otro) estado.respuestas[clave] = { otro: true, texto: '', color: '' };
+      var nota = actual ? actual.nota || '' : '';
+      if (d.otro) {
+        if (!actual || !actual.otro) estado.respuestas[clave] = { otro: true, texto: '', color: '', nota: nota };
         repintarPregunta(clave);
         var campo = document.getElementById('otro-' + clave);
         if (campo) campo.focus();
       } else {
-        var indice = Number(boton.dataset.indice);
+        var indice = Number(d.indice);
         // Tocar de nuevo la alternativa elegida la retira (pregunta no conversada).
         if (actual && !actual.otro && actual.indice === indice) delete estado.respuestas[clave];
-        else estado.respuestas[clave] = { indice: indice };
+        else estado.respuestas[clave] = { indice: indice, nota: nota };
         repintarPregunta(clave);
       }
+    } else if (d.agregar) {
+      var nuevo = d.agregar === 'compromisos' ? { descripcion: '', responsable: '' } : LISTAS[d.agregar].nuevo();
+      estado[d.agregar].push(nuevo);
+      pintar();
+      var primero = document.querySelector('[data-lista="' + d.agregar + '"][data-indice="' + (estado[d.agregar].length - 1) + '"]');
+      if (primero) primero.focus();
+    } else if (d.quitar) {
+      estado[d.quitar].splice(Number(d.indice), 1);
+      pintar();
+    } else if (d.responsable !== undefined) {
+      estado.compromisos[Number(d.responsable)].responsable = d.valor;
+      pintar();
     } else if (boton.id === 'guardar') {
       guardar(boton);
     } else if (boton.id === 'generar') {
@@ -605,6 +865,7 @@
 
   llamar('obtenerDatosIniciales').then(function (respuesta) {
     datos = respuesta;
+    estado = estadoInicial(leerTutoresRecordados());
     if (datos.semestre) {
       var chip = document.getElementById('semestre');
       chip.textContent = 'Semestre ' + datos.semestre;

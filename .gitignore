@@ -22,3 +22,6 @@ node_modules/
 
 # Configuracion local de Claude Code
 .claude/settings.local.json
+
+# Datos reales de tutores, equipos y estudiantes: viven en la planilla, nunca en git
+datos/

@@ -98,15 +98,27 @@ test('banco: todas las alternativas tienen color de semáforo', () => {
   }
 });
 
+// Datos ficticios: nunca datos reales en las pruebas.
 const referencia = {
-  equipos: datos.EQUIPOS_EJEMPLO.equipos.map((e) => ({ ...e, semestre: '2026-2' })),
+  tutores: [
+    { alias: 'Ana', nombre: 'Ana', apellido: 'Pérez', activo: true },
+    { alias: 'Luis', nombre: 'Luis', apellido: '', activo: true },
+    { alias: 'Pepa R.', nombre: '', apellido: '', activo: true },
+    { alias: 'Inactivo', nombre: 'Tito', apellido: 'Soto', activo: false }
+  ],
+  equipos: [
+    { semestre: '2026-2', numero: 1, nombre: 'Dron para minería', curso: 'EL6030', dupla: 'Ana y Luis', integrantes: [], activo: true },
+    { semestre: '2026-2', numero: 2, nombre: 'Kits de robotica accesibles', curso: 'EL4030', dupla: 'Ana y Luis',
+      integrantes: ['Rosa Díaz', 'Pedro Lagos'], activo: true },
+    { semestre: '2026-2', numero: 3, nombre: 'Equipo retirado', curso: 'EL4030', dupla: 'Ana y Luis', integrantes: [], activo: false }
+  ],
   hitos: datos.HITOS_EJEMPLO.hitos,
   preguntas: datos.BANCO_PREGUNTAS.preguntas
 };
 
 function entradaValida(respuestas) {
   return {
-    conduce: { nombre: ' ana ', apellido: 'pérez' },
+    conduce: { alias: 'Ana' },
     registra: { nombre: 'luis', apellido: 'de la fuente' },
     equipoNumero: 2,
     hitoNumero: 1,
@@ -114,26 +126,40 @@ function entradaValida(respuestas) {
   };
 }
 
-test('prepararTutoria: copia textos y colores del banco y normaliza nombres', () => {
+test('prepararTutoria: copia textos y colores del banco, notas y nombres', () => {
   const resultado = prepararTutoria(
     entradaValida({
-      'EL4030-H1-PRB-1': { indice: 2 },
+      'EL4030-H1-PRB-1': { indice: 2, nota: '  No saben   a quién entrevistar ' },
       'EL4030-H1-PRB-2': { otro: true, texto: '  Tienen  una encuesta ', color: 'amarillo' }
     }),
     referencia
   );
   assert.deepEqual(resultado.errores, []);
   assert.equal(resultado.tutoria.conduceNombre, 'Ana');
+  assert.equal(resultado.tutoria.conduceApellido, 'Pérez');
   assert.equal(resultado.tutoria.registraApellido, 'De la Fuente');
   assert.equal(resultado.tutoria.equipoProyecto, 'Kits de robotica accesibles');
+  assert.equal(resultado.tutoria.dupla, 'Ana y Luis');
   assert.equal(resultado.tutoria.hitoNombre, 'Hito 1');
   assert.deepEqual(
-    resultado.respuestas.map((r) => [r.preguntaClave, r.respuestaTexto, r.color, r.respuestaPropia]),
+    resultado.respuestas.map((r) => [r.preguntaClave, r.respuestaTexto, r.color, r.respuestaPropia, r.nota]),
     [
-      ['EL4030-H1-PRB-1', 'Aun no la definen', 'rojo', false],
-      ['EL4030-H1-PRB-2', 'Tienen una encuesta', 'amarillo', true]
+      ['EL4030-H1-PRB-1', 'Aun no la definen', 'rojo', false, 'No saben a quién entrevistar'],
+      ['EL4030-H1-PRB-2', 'Tienen una encuesta', 'amarillo', true, '']
     ]
   );
+});
+
+test('prepararTutoria: tutor de la lista sin nombre usa el alias; inactivos no valen', () => {
+  const entrada = entradaValida({});
+  entrada.registra = { alias: 'pepa r.' };
+  const resultado = prepararTutoria(entrada, referencia);
+  assert.deepEqual(resultado.errores, []);
+  assert.equal(resultado.tutoria.registraNombre, 'Pepa R.');
+  assert.equal(resultado.tutoria.registraApellido, '');
+
+  entrada.registra = { alias: 'Inactivo' };
+  assert.deepEqual(prepararTutoria(entrada, referencia).errores, ['Elige de la lista a quien toma notas.']);
 });
 
 test('prepararTutoria: rechaza tutores iguales, "Otro" sin color y preguntas fuera del guion', () => {
@@ -141,9 +167,67 @@ test('prepararTutoria: rechaza tutores iguales, "Otro" sin color y preguntas fue
     'EL4030-H1-PRB-1': { otro: true, texto: 'algo', color: '' },
     'EL5030-H1-PRB-1': { indice: 0 }
   });
-  entrada.registra = { nombre: 'ANA', apellido: 'Perez' };
+  entrada.registra = { alias: 'ANA' };
   const { errores } = prepararTutoria(entrada, referencia);
   assert.equal(errores.length, 3);
+  assert.ok(errores.includes('Quien conduce y quien toma notas deben ser personas distintas.'));
+});
+
+test('prepararTutoria: tutor escrito a mano igual a uno de la lista también se rechaza', () => {
+  const entrada = entradaValida({});
+  entrada.registra = { nombre: 'ana', apellido: 'perez' };
+  assert.deepEqual(prepararTutoria(entrada, referencia).errores, [
+    'Quien conduce y quien toma notas deben ser personas distintas.'
+  ]);
+});
+
+test('prepararTutoria: integrantes de la lista y agregados a mano, sin repetir', () => {
+  const entrada = entradaValida({});
+  entrada.integrantes = {
+    lista: ['Pedro Lagos', 'rosa diaz'],
+    otros: [{ nombre: 'maría', apellido: 'soto' }, { nombre: 'Pedro', apellido: 'Lagos' }]
+  };
+  const resultado = prepararTutoria(entrada, referencia);
+  assert.deepEqual(resultado.errores, []);
+  assert.deepEqual(resultado.tutoria.integrantesPresentes, ['Pedro Lagos', 'Rosa Díaz', 'María Soto']);
+
+  entrada.integrantes = { lista: ['Alguien Más'], otros: [{ nombre: 'Solo', apellido: '' }] };
+  assert.equal(prepararTutoria(entrada, referencia).errores.length, 2);
+});
+
+test('prepararTutoria: preguntas del tutor, consultas y compromisos', () => {
+  const entrada = entradaValida({});
+  entrada.preguntasTutor = [{ pregunta: ' ¿Cuándo prueban? ', respuesta: '' }, { pregunta: '', respuesta: '' }];
+  entrada.consultas = [{ preguntaEquipo: '¿Podemos cambiar de idea?', respuestaTutor: 'Sí, antes del hito' }];
+  entrada.compromisos = [{ descripcion: 'Entrevistar a 5 profesores', responsable: 'equipo' }];
+  const resultado = prepararTutoria(entrada, referencia);
+  assert.deepEqual(resultado.errores, []);
+  assert.deepEqual(resultado.preguntasTutor, [{ pregunta: '¿Cuándo prueban?', respuesta: '' }]);
+  assert.deepEqual(resultado.consultas, [{ preguntaEquipo: '¿Podemos cambiar de idea?', respuestaTutor: 'Sí, antes del hito' }]);
+  assert.deepEqual(resultado.compromisos, [{ descripcion: 'Entrevistar a 5 profesores', responsable: 'equipo' }]);
+});
+
+test('prepararTutoria: compromisos sin responsable, más de tres o respuesta sin pregunta', () => {
+  const entrada = entradaValida({});
+  entrada.preguntasTutor = [{ pregunta: '', respuesta: 'Una respuesta suelta' }];
+  entrada.compromisos = [
+    { descripcion: 'Uno', responsable: '' },
+    { descripcion: 'Dos', responsable: 'tutores' },
+    { descripcion: 'Tres', responsable: 'equipo' },
+    { descripcion: 'Cuatro', responsable: 'equipo' }
+  ];
+  const { errores } = prepararTutoria(entrada, referencia);
+  assert.deepEqual(errores, [
+    'Falta el texto de la pregunta del tutor 1.',
+    'Elige el responsable del compromiso 1.',
+    'Se pueden registrar hasta 3 compromisos.'
+  ]);
+});
+
+test('prepararTutoria: equipo inactivo no se puede elegir', () => {
+  const entrada = entradaValida({});
+  entrada.equipoNumero = 3;
+  assert.ok(prepararTutoria(entrada, referencia).errores.includes('Elige un equipo de la lista.'));
 });
 
 test('prepararTutoria: equipo sin hitos cargados usa los genéricos', () => {
