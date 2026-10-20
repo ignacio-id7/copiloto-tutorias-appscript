@@ -3,7 +3,7 @@
  *
  * El archivo tiene dos partes:
  * 1. Funciones puras (tutores y duplas, semáforo, guion, prompt, plantilla sin IA, cascada de
- *    Gemini, minuta, tablas de análisis). No tocan ningún servicio de Google y se prueban con
+ *    Gemini, minuta, tablas de análisis, panel). No tocan ningún servicio de Google y se prueban con
  *    `node --test "pruebas/*.test.js"`.
  * 2. Funciones de Apps Script: planilla, aplicación web, Gemini por UrlFetchApp y acta en
  *    Google Docs.
@@ -827,6 +827,314 @@ function filasEstadoEquipos(equipos, filasSemaforo, hoy) {
     });
 }
 
+// --- Panel de seguimiento ------------------------------------------------------------------
+
+// "Sin tutoría reciente": la última tiene al menos estos días (o el equipo no tiene ninguna).
+var DIAS_SIN_TUTORIA = 14;
+var MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+/**
+ * Semana ISO 8601 de una fecha 'AAAA-MM-DD' (la semana empieza el lunes y pertenece al año de
+ * su jueves): {clave: '2026-W42', lunes: '2026-10-12', rotulo: 'Sem. 12 oct'}, o null.
+ */
+function semanaIso(fechaIso) {
+  var partes = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(fechaIso || '').trim());
+  if (!partes) return null;
+  var dia = 86400000;
+  var fecha = Date.UTC(Number(partes[1]), Number(partes[2]) - 1, Number(partes[3]));
+  var lunes = new Date(fecha - ((new Date(fecha).getUTCDay() + 6) % 7) * dia);
+  var jueves = new Date(lunes.getTime() + 3 * dia);
+  var anio = jueves.getUTCFullYear();
+  var numero = Math.floor((jueves.getTime() - Date.UTC(anio, 0, 1)) / dia / 7) + 1;
+  return {
+    clave: anio + '-W' + (numero < 10 ? '0' : '') + numero,
+    lunes: lunes.toISOString().slice(0, 10),
+    rotulo: 'Sem. ' + lunes.getUTCDate() + ' ' + MESES_CORTOS[lunes.getUTCMonth()]
+  };
+}
+
+/**
+ * Todo lo que necesita el Panel, calculado en el momento desde las pestañas (no depende de
+ * SemaforoDimensiones ni EstadoEquipos). Los filtros los aplica el navegador con resumirPanel.
+ * Solo sale lo que se copia aquí campo por campo: ni `integrantes` de Equipos ni
+ * `integrantes_presentes` de Tutorias salen del servidor.
+ * datos: { equipos (como en leerEquipos), tutorias, respuestas, actas, compromisos, consultas
+ *   (filas de la planilla) }. hoy: 'AAAA-MM-DD' en Chile.
+ */
+function armarPanel(datos, hoy) {
+  datos = datos || {};
+  var semaforo = filasSemaforoDimensiones(datos.tutorias, datos.respuestas, datos.actas);
+  var estado = filasEstadoEquipos(datos.equipos, semaforo, hoy);
+
+  // Un mismo nombre de dupla escrito con otras mayúsculas o tildes se muestra igual en todo el panel.
+  var nombresDupla = {};
+  var nombreDupla = function (texto) {
+    var limpio = textoEnUnaLinea(texto);
+    var clave = claveNombre(limpio);
+    if (!clave) return '';
+    return (nombresDupla[clave] = nombresDupla[clave] || limpio);
+  };
+  var colorODato = function (color) {
+    return color === SIN_DATO_COLOR ? '' : color;
+  };
+
+  var equipos = estado.map(function (fila) {
+    var colores = {};
+    DIMENSIONES.forEach(function (d) {
+      colores[d] = colorODato(fila['color_' + d.toLowerCase()]);
+    });
+    var dias = fila.dias_desde_ultima === '' ? null : fila.dias_desde_ultima;
+    return {
+      semestre: fila.semestre,
+      numero: fila.equipo_numero,
+      proyecto: fila.equipo_proyecto,
+      curso: fila.curso,
+      dupla: nombreDupla(fila.dupla),
+      tutorias: fila.tutorias,
+      ultimaFecha: fila.ultima_fecha,
+      diasDesdeUltima: dias,
+      colores: colores,
+      peor: colorODato(fila.peor_color),
+      sinTutoriaReciente: dias === null || dias >= DIAS_SIN_TUTORIA
+    };
+  });
+
+  var actas = {};
+  (datos.actas || []).forEach(function (a) {
+    actas[a.tutoria_id] = a;
+  });
+  var tutorias = [];
+  var porId = {};
+  semaforo.forEach(function (fila) {
+    var tutoria = porId[fila.tutoria_id];
+    if (!tutoria) {
+      var acta = actas[fila.tutoria_id];
+      var estadoActa = !acta ? 'sin acta' : acta.estado === 'aprobada' ? 'aprobada' : 'borrador';
+      var semana = semanaIso(fila.fecha);
+      tutoria = porId[fila.tutoria_id] = {
+        id: fila.tutoria_id,
+        fecha: fila.fecha,
+        semestre: fila.semestre,
+        curso: fila.curso,
+        dupla: nombreDupla(fila.dupla),
+        equipoNumero: fila.equipo_numero,
+        equipoProyecto: fila.equipo_proyecto,
+        hitoNumero: fila.hito_numero,
+        hitoNombre: fila.hito_nombre,
+        conduce: fila.conduce,
+        registra: fila.registra,
+        colores: {},
+        esUltima: fila.es_ultima_del_equipo,
+        acta: estadoActa,
+        actaUrl: estadoActa === 'aprobada' ? acta.documento_url || '' : '',
+        semana: semana ? semana.clave : '',
+        semanaRotulo: semana ? semana.rotulo : ''
+      };
+      tutorias.push(tutoria);
+    }
+    tutoria.colores[fila.dimension] = colorODato(fila.color);
+  });
+  // Más recientes primero.
+  tutorias.reverse();
+
+  var hijas = function (filas, copiar) {
+    return (filas || []).filter(function (fila) {
+      return porId[fila.tutoria_id];
+    }).sort(function (a, b) {
+      var ta = porId[a.tutoria_id];
+      var tb = porId[b.tutoria_id];
+      return tutorias.indexOf(ta) - tutorias.indexOf(tb) || Number(a.orden) - Number(b.orden);
+    }).map(function (fila) {
+      var t = porId[fila.tutoria_id];
+      var objeto = {
+        tutoriaId: t.id, fecha: t.fecha, semestre: t.semestre, curso: t.curso, dupla: t.dupla,
+        equipoNumero: t.equipoNumero, equipoProyecto: t.equipoProyecto, hitoNumero: t.hitoNumero,
+        hitoNombre: t.hitoNombre
+      };
+      copiar(objeto, fila);
+      return objeto;
+    });
+  };
+
+  var semestres = {};
+  equipos.concat(tutorias).forEach(function (fila) {
+    if (fila.semestre) semestres[fila.semestre] = true;
+  });
+  return {
+    hoy: hoy,
+    diasSinTutoria: DIAS_SIN_TUTORIA,
+    dimensiones: DIMENSIONES.map(function (d) {
+      return { codigo: d, nombre: NOMBRES_DIMENSION[d] };
+    }),
+    semestres: Object.keys(semestres).sort().reverse(),
+    equipos: equipos,
+    tutorias: tutorias,
+    compromisos: hijas(datos.compromisos, function (objeto, fila) {
+      objeto.descripcion = fila.descripcion;
+      objeto.responsable = ETIQUETAS_RESPONSABLE[fila.responsable] || fila.responsable || '';
+    }),
+    consultas: hijas(datos.consultas, function (objeto, fila) {
+      objeto.pregunta = fila.pregunta_equipo;
+      objeto.respuesta = fila.respuesta_tutor || '';
+    })
+  };
+}
+
+/**
+ * Tarjetas, tablas y gráficos del Panel para unos filtros {semestre, curso, dupla, hito}
+ * (vacío = todos). El filtro de hito solo cambia la evolución y los compromisos y consultas:
+ * el estado actual es siempre la última tutoría de cada equipo.
+ *
+ * El navegador recibe esta misma función (codigoCompartidoPanel), así que no puede usar nada
+ * de fuera de su cuerpo.
+ */
+function resumirPanel(panel, filtros) {
+  filtros = filtros || {};
+  var dimensiones = panel.dimensiones.map(function (d) {
+    return d.codigo;
+  });
+  var colores = ['verde', 'amarillo', 'rojo'];
+  var coincide = function (fila, conHito) {
+    return (!filtros.semestre || fila.semestre === filtros.semestre) &&
+      (!filtros.curso || fila.curso === filtros.curso) &&
+      (!filtros.dupla || fila.dupla === filtros.dupla) &&
+      (!conHito || !filtros.hito || String(fila.hitoNumero) === String(filtros.hito));
+  };
+  var equipos = panel.equipos.filter(function (e) {
+    return coincide(e, false);
+  });
+  var tutorias = panel.tutorias.filter(function (t) {
+    return coincide(t, false);
+  });
+  var tutoriasDelHito = tutorias.filter(function (t) {
+    return coincide(t, true);
+  });
+  var cuenta = function (lista, condicion) {
+    return lista.filter(condicion).length;
+  };
+
+  // Rojos primero, después más días sin tutoría (sin ninguna cuenta como la más antigua).
+  var dias = function (e) {
+    return e.diasDesdeUltima === null ? Infinity : e.diasDesdeUltima;
+  };
+  equipos.sort(function (a, b) {
+    return ((b.peor === 'rojo') - (a.peor === 'rojo')) || (dias(b) - dias(a) || 0) || a.numero - b.numero;
+  });
+
+  var problemas = dimensiones.map(function (d) {
+    var fila = { codigo: d, verde: 0, amarillo: 0, rojo: 0, sinDato: 0 };
+    equipos.forEach(function (e) {
+      if (e.colores[d]) fila[e.colores[d]]++;
+      else fila.sinDato++;
+    });
+    return fila;
+  });
+
+  var semanas = {};
+  tutoriasDelHito.forEach(function (t) {
+    if (!t.semana) return;
+    var semana = semanas[t.semana] = semanas[t.semana] ||
+      { clave: t.semana, rotulo: t.semanaRotulo, tutorias: 0, verde: 0, amarillo: 0, rojo: 0, total: 0 };
+    semana.tutorias++;
+    dimensiones.forEach(function (d) {
+      if (colores.indexOf(t.colores[d]) === -1) return;
+      semana[t.colores[d]]++;
+      semana.total++;
+    });
+  });
+
+  var duplas = {};
+  var duplaDe = function (nombre) {
+    return duplas[nombre] = duplas[nombre] || { dupla: nombre, equipos: 0, tutorias: 0, sinTutoriaReciente: 0,
+      dimensionesEnRojo: 0, dimensionesConDato: 0, actasPendientes: 0 };
+  };
+  equipos.forEach(function (e) {
+    var fila = duplaDe(e.dupla);
+    fila.equipos++;
+    if (e.sinTutoriaReciente) fila.sinTutoriaReciente++;
+    dimensiones.forEach(function (d) {
+      if (!e.colores[d]) return;
+      fila.dimensionesConDato++;
+      if (e.colores[d] === 'rojo') fila.dimensionesEnRojo++;
+    });
+  });
+  tutorias.forEach(function (t) {
+    var fila = duplaDe(t.dupla);
+    fila.tutorias++;
+    if (t.acta !== 'aprobada') fila.actasPendientes++;
+  });
+
+  var unicos = function (filas, campo) {
+    var vistos = {};
+    filas.forEach(function (f) {
+      if (f[campo]) vistos[f[campo]] = true;
+    });
+    return Object.keys(vistos).sort(function (a, b) {
+      return a.localeCompare(b, 'es');
+    });
+  };
+  var delSemestre = function (fila) {
+    return !filtros.semestre || fila.semestre === filtros.semestre;
+  };
+  var filasDelSemestre = panel.equipos.filter(delSemestre).concat(panel.tutorias.filter(delSemestre));
+  var hitos = {};
+  panel.tutorias.filter(delSemestre).forEach(function (t) {
+    if (t.hitoNumero === '' || t.hitoNumero === null) return;
+    var hito = hitos[t.hitoNumero] = hitos[t.hitoNumero] || { numero: t.hitoNumero, nombres: [] };
+    if (t.hitoNombre && hito.nombres.indexOf(t.hitoNombre) === -1) hito.nombres.push(t.hitoNombre);
+  });
+
+  return {
+    tarjetas: {
+      tutorias: tutorias.length,
+      equipos: equipos.length,
+      equiposConRojo: cuenta(equipos, function (e) {
+        return e.peor === 'rojo';
+      }),
+      sinTutoriaReciente: cuenta(equipos, function (e) {
+        return e.sinTutoriaReciente;
+      }),
+      actasAprobadas: cuenta(tutorias, function (t) {
+        return t.acta === 'aprobada';
+      })
+    },
+    equipos: equipos,
+    problemas: problemas,
+    semanas: Object.keys(semanas).sort().map(function (clave) {
+      return semanas[clave];
+    }),
+    duplas: Object.keys(duplas).sort(function (a, b) {
+      // "Sin dupla" (nombre vacío) al final.
+      return (a === '') - (b === '') || a.localeCompare(b, 'es');
+    }).map(function (nombre) {
+      var fila = duplas[nombre];
+      fila.porcentajeRojo = fila.dimensionesConDato
+        ? Math.round((100 * fila.dimensionesEnRojo) / fila.dimensionesConDato) : null;
+      return fila;
+    }),
+    compromisos: panel.compromisos.filter(function (c) {
+      return coincide(c, true);
+    }),
+    consultas: panel.consultas.filter(function (c) {
+      return coincide(c, true);
+    }),
+    opciones: {
+      cursos: unicos(filasDelSemestre, 'curso'),
+      duplas: unicos(filasDelSemestre, 'dupla'),
+      hitos: Object.keys(hitos).map(function (numero) {
+        return { numero: hitos[numero].numero, nombre: hitos[numero].nombres.join(' / ') || 'Hito ' + numero };
+      }).sort(function (a, b) {
+        return a.numero - b.numero;
+      })
+    }
+  };
+}
+
+/** El código de resumirPanel para el navegador (Index.html): el mismo que prueban las pruebas. */
+function codigoCompartidoPanel() {
+  return resumirPanel.toString();
+}
+
 // --- Minuta (estructura de backend/app/logica/documento_acta.py) ---------------------------
 
 var TITULO_MINUTA = 'Minuta de Seguimiento';
@@ -1329,6 +1637,19 @@ function ahoraEnChile(formato) {
   return Utilities.formatDate(new Date(), ZONA_HORARIA, formato || 'yyyy-MM-dd HH:mm:ss');
 }
 
+/** Equipos de la planilla (los que tienen número, proyecto y curso), por número. */
+function leerEquipos() {
+  return leerHoja('Equipos').filter(function (e) {
+    return e.numero && e.nombre_proyecto && e.curso;
+  }).map(function (e) {
+    return { semestre: e.semestre, numero: Number(e.numero), nombre: e.nombre_proyecto, curso: e.curso,
+      dupla: e.dupla || '', integrantes: separarIntegrantes(e.integrantes), descripcion: e.descripcion || '',
+      activo: estaActivo(e.activo) };
+  }).sort(function (a, b) {
+    return a.numero - b.numero;
+  });
+}
+
 /**
  * Tutores, duplas, equipos, hitos y preguntas leídos de la planilla, con los tipos que esperan
  * las funciones puras. Las columnas `activo` y `activa` quedan como booleanos.
@@ -1345,15 +1666,7 @@ function leerReferencia() {
     return { semestre: d.semestre, dupla: d.dupla || d.tutor_1 + ' y ' + d.tutor_2, tutor_1: d.tutor_1,
       tutor_2: d.tutor_2, activa: estaActivo(d.activa) };
   });
-  var equipos = leerHoja('Equipos').filter(function (e) {
-    return e.numero && e.nombre_proyecto && e.curso;
-  }).map(function (e) {
-    return { semestre: e.semestre, numero: Number(e.numero), nombre: e.nombre_proyecto, curso: e.curso,
-      dupla: e.dupla || '', integrantes: separarIntegrantes(e.integrantes), descripcion: e.descripcion || '',
-      activo: estaActivo(e.activo) };
-  }).sort(function (a, b) {
-    return a.numero - b.numero;
-  });
+  var equipos = leerEquipos();
   var hitos = leerHoja('Hitos').filter(function (h) {
     return h.curso && h.numero && h.nombre;
   }).map(function (h) {
@@ -1489,6 +1802,21 @@ function obtenerDatosIniciales() {
     }),
     maximoCompromisos: MAXIMO_COMPROMISOS
   };
+}
+
+/**
+ * El Panel de seguimiento, calculado en el momento con la fecha de hoy en Chile. Lo puede ver
+ * cualquiera que abra la aplicación; armarPanel no deja salir datos de estudiantes.
+ */
+function obtenerPanel() {
+  return armarPanel({
+    equipos: leerEquipos(),
+    tutorias: leerHoja('Tutorias'),
+    respuestas: leerHoja('Respuestas'),
+    actas: leerHoja('Actas'),
+    compromisos: leerHoja('Compromisos'),
+    consultas: leerHoja('ConsultasEquipo')
+  }, ahoraEnChile('yyyy-MM-dd'));
 }
 
 function conBloqueo(funcion) {
@@ -1835,6 +2163,10 @@ if (typeof module !== 'undefined') {
     diasEntre: diasEntre,
     filasSemaforoDimensiones: filasSemaforoDimensiones,
     filasEstadoEquipos: filasEstadoEquipos,
+    semanaIso: semanaIso,
+    armarPanel: armarPanel,
+    resumirPanel: resumirPanel,
+    codigoCompartidoPanel: codigoCompartidoPanel,
     lineasObservaciones: lineasObservaciones,
     armarMinuta: armarMinuta,
     nombreArchivoActa: nombreArchivoActa

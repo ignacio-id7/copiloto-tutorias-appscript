@@ -14,10 +14,16 @@
         <span class="marca__rotulo">Impulsa DIE</span>
         <span class="marca__nombre">Copiloto de Tutorías</span>
       </div>
-      <span class="chip-semestre" id="semestre" hidden></span>
+      <div class="cabecera__derecha">
+        <nav class="vistas" aria-label="Vistas">
+          <button type="button" class="vistas__boton" data-vista="registro" aria-pressed="true">Registro</button>
+          <button type="button" class="vistas__boton" data-vista="panel" aria-pressed="false">Panel</button>
+        </nav>
+        <span class="chip-semestre" id="semestre" hidden></span>
+      </div>
     </header>
 
-    <div class="marco">
+    <div class="marco" id="vista-registro">
       <nav class="lateral" aria-label="Pasos del registro">
         <ol class="pasos-lista" id="pasos-lista"></ol>
       </nav>
@@ -33,6 +39,10 @@
       </main>
     </div>
 
+    <main class="panel" id="panel" tabindex="-1" hidden></main>
+
+    <!-- resumirPanel, la misma función de Codigo.gs que prueban las pruebas de Node. -->
+    <script><?!= codigoCompartidoPanel(); ?></script>
     <?!= incluir('Cliente'); ?>
   </body>
 </html>

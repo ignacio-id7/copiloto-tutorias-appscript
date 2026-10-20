@@ -7,6 +7,9 @@ sección 7 cómo cargar los datos reales del semestre.
 **Si ya instalaste el primer prototipo**, no repitas las secciones 1 a 5: ve directo a la
 sección 7, que dice qué volver a pegar y qué cargar.
 
+**Si ya tienes la segunda versión** (tutores, duplas e integrantes), ve directo a la sección 9:
+agrega el Panel de seguimiento.
+
 Necesitas:
 
 - La cuenta de Google de Impulsa (no una cuenta personal: la app y las actas quedan en el
@@ -329,14 +332,57 @@ paso** y **Omitir y guardar**.
    los permisos de la cuenta de Impulsa. El botón "Abrir en Google Docs", en cambio, solo
    funciona para quien tenga acceso a la carpeta.
 
-### 8.5 Panel de Data Studio
+### 8.5 Panel de seguimiento
 
-Arma el informe con `DATA_STUDIO.md`. La tutoría de la comprobación 8.2 debe aparecer en la
-tarjeta "Tutorías realizadas" y en la tabla de equipos.
+Sigue la sección 9.2. La tutoría de la comprobación 8.2 debe aparecer en la tarjeta "Tutorías
+realizadas" y en la tabla de estado de los equipos. El informe de Data Studio
+(`DATA_STUDIO.md`) es opcional.
 
 Cuando termines las comprobaciones, borra a mano las filas de prueba de `Tutorias`,
 `Respuestas`, `PreguntasTutor`, `ConsultasEquipo`, `Compromisos` y `Actas` (Sheets avisa
 porque están protegidas) y usa **Copiloto > Recalcular tablas de análisis**.
+
+---
+
+## 9. Panel de seguimiento (tercera versión)
+
+El Panel está dentro de la misma aplicación web: no hay que armar nada en Data Studio. Lo ve
+cualquiera que abra la URL de la app, y no muestra nombres de estudiantes.
+
+### 9.1 Volver a pegar los archivos y actualizar el despliegue
+
+1. En esta versión cambiaron cuatro archivos de `src/`: `Codigo.gs`, `Index.html`,
+   `Estilos.html` y `Cliente.html`. `Datos.gs` no cambió. Pega los cuatro (sección 6, paso 1).
+2. No hay pestañas ni columnas nuevas ni permisos nuevos. Correr `configurarPlanilla` no hace
+   falta, pero tampoco hace daño (sección 6, paso 2).
+3. Actualiza el despliegue sin cambiar la URL: sección 6, pasos 3 a 6.
+
+### 9.2 Probar el Panel
+
+1. Abre la URL de la app (o recarga la página si ya estaba abierta). Arriba a la derecha
+   aparecen dos botones: **Registro** (marcado) y **Panel**.
+2. En **Registro**, avanza hasta el paso 2 y elige un equipo. Haz clic en **Panel**: aparece
+   "Leyendo la planilla..." y después el panel. Vuelve a **Registro**: el registro sigue en el
+   paso 2 con el mismo equipo elegido.
+3. En el Panel, revisa:
+   - Los filtros de semestre (con el más reciente elegido), curso, dupla e hito, y debajo la
+     línea que explica que el estado actual es la última tutoría de cada equipo.
+   - Las cuatro tarjetas: tutorías realizadas, equipos con rojo, sin tutoría en 14 días y actas
+     aprobadas.
+   - La tabla "Estado de los equipos", con los rojos primero. Toca el número de un equipo: se
+     abre su historial, con el estado del acta y el enlace "Abrir acta" si está aprobada.
+   - "Dónde están los problemas hoy", "Evolución semanal", "Duplas" y "Compromisos y
+     consultas".
+4. Elige un hito en el filtro: cambian la evolución, el historial y los compromisos y consultas,
+   pero no las tarjetas ni el estado de los equipos.
+5. Guarda una tutoría nueva en **Registro**, vuelve a **Panel** y haz clic en **Actualizar**:
+   la tarjeta "Tutorías realizadas" sube en uno.
+6. Ábrelo en un teléfono: las tarjetas quedan de dos en dos y las tablas se desplazan de lado
+   dentro de su recuadro, con la primera columna fija.
+
+Si el Panel dice que no se pudo cargar, revisa que las pestañas `Equipos`, `Tutorias`,
+`Respuestas`, `Actas`, `Compromisos` y `ConsultasEquipo` existan (sección 3) y que hayas
+actualizado el despliegue con una versión nueva (sección 6, pasos 3 a 6).
 
 ---
 

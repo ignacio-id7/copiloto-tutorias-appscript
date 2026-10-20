@@ -1,5 +1,10 @@
 # Panel de seguimiento en Data Studio
 
+**Esta guía es opcional.** El seguimiento diario está en el **Panel** de la propia aplicación
+web (el botón "Panel" de la cabecera): tarjetas, estado de los equipos, problemas por dimensión,
+evolución semanal, duplas, compromisos y consultas, calculados en el momento desde la planilla.
+Esta guía sirve para quien quiera armar gráficos propios en Data Studio.
+
 Guía para armar a mano, con la cuenta de Google de Impulsa, el informe que muestra el estado de
 los equipos a partir de la planilla del Copiloto. Data Studio (antes Looker Studio) es la
 herramienta gratuita de paneles de Google; entra en <https://datastudio.google.com>.

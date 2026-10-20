@@ -41,8 +41,8 @@ usuario lo pega en el editor de Apps Script de una planilla de la cuenta de Impu
 - Sin manifiesto `appsscript.json`: la configuración de la aplicación web se elige al
   desplegar, y los permisos los detecta el editor a partir del código.
 - Las funciones puras (dupla de dos tutores, equipos de la dupla, validación del registro,
-  semáforo de peor caso y `valor`, tablas de análisis, armado del prompt, plantilla sin IA,
-  cascada de modelos, estructura de la minuta, normalización de nombres) no tocan servicios de
+  semáforo de peor caso y `valor`, tablas de análisis, panel y semana ISO, armado del prompt,
+  plantilla sin IA, cascada de modelos, estructura de la minuta, normalización de nombres) no tocan servicios de
   Google y tienen pruebas en `pruebas/`, que corren con:
 
   ```powershell
@@ -100,9 +100,46 @@ usuario lo pega en el editor de Apps Script de una planilla de la cuenta de Impu
 PRB problema y cliente · SOL solución y prototipo · VAL validación y aprendizaje · EQP equipo
 y roles · GES gestión y ritmo · HIT preparación del hito.
 
-## Data Studio
+## Panel
 
-`DATA_STUDIO.md` es la guía para que el usuario arme el informe a mano. Lee `SemaforoDimensiones`,
+El seguimiento diario está en la misma aplicación web: la cabecera tiene dos botones,
+**Registro** y **Panel** (`aria-pressed`). Cambiar de vista solo oculta la otra, así que un
+registro en curso no se pierde. El panel se carga al entrar por primera vez y con **Actualizar**.
+
+- **Lo ve cualquiera que abra la app** (decisión del usuario): no hay control de acceso aparte
+  del despliegue.
+- **Ningún dato de estudiantes sale del servidor.** `armarPanel` copia campo por campo lo que
+  entrega: nunca `integrantes` de `Equipos` ni `integrantes_presentes` de `Tutorias`. Hay una
+  prueba que recorre toda la salida. Cualquier campo nuevo del panel se agrega a mano a esa
+  copia, nunca pasando filas completas.
+- **Servidor.** `obtenerPanel()` lee `Equipos`, `Tutorias`, `Respuestas`, `Actas`,
+  `Compromisos` y `ConsultasEquipo` y llama a la función pura `armarPanel(datos, hoy)`, que
+  calcula en el momento con `filasSemaforoDimensiones` y `filasEstadoEquipos` (hoy en Chile).
+  No depende de que `SemaforoDimensiones` y `EstadoEquipos` estén recalculadas. Entrega todo de
+  una vez: equipos activos con su estado actual, tutorías (con semana ISO, estado del acta y
+  enlace si está aprobada), compromisos y consultas con el contexto de su tutoría.
+- **Filtros en el navegador** (semestre, por defecto el más reciente; curso; dupla; hito). Los
+  aplica `resumirPanel(panel, filtros)`, función pura de `Codigo.gs` que `Index.html` incluye en
+  la página con `codigoCompartidoPanel()` (su código fuente): el navegador ejecuta la misma
+  función que prueban las pruebas, así que no puede usar nada de fuera de su cuerpo.
+- **Estado actual = última tutoría de cada equipo**, sin importar el hito. El filtro de hito
+  solo cambia la evolución semanal, el historial del equipo y los compromisos y consultas; la
+  página lo dice en una línea.
+- **Contenido:** tarjetas (tutorías realizadas, equipos con rojo en su última tutoría, equipos
+  sin tutoría en 14 días incluidos los que no tienen ninguna, actas aprobadas sobre el total);
+  tabla de estado (rojos primero, después más días sin tutoría; ordenable; al tocar un equipo,
+  su historial, compromisos y consultas); barras apiladas por dimensión con los equipos en cada
+  color hoy; evolución por semana ISO al 100 % (las sin dato no cuentan; rótulo "Sem. 12 oct");
+  tabla de duplas (la dupla del equipo); compromisos y consultas con búsqueda.
+- Gráficos con CSS, sin librerías. Colores del semáforo solo con `--color-verde`,
+  `--color-amarillo`, `--color-rojo` y `--color-gris`; cada celda de color lleva también la
+  inicial o el texto. Todo texto de la planilla pasa por `escapar`. En el teléfono, tarjetas de
+  dos en dos y tablas con desplazamiento horizontal propio y la primera columna fija.
+
+## Data Studio (opcional)
+
+El seguimiento diario ya está en el Panel. `DATA_STUDIO.md` queda como guía opcional para quien
+quiera armar gráficos propios en Data Studio. Lee `SemaforoDimensiones`,
 `EstadoEquipos`, `Tutorias`, `Compromisos` y `ConsultasEquipo` con las credenciales del
 propietario. Ningún panel muestra nombres de estudiantes (`integrantes_presentes` no se usa).
 Si cambian las columnas de esas pestañas, se actualiza la guía.

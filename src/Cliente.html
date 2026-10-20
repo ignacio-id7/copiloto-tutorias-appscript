@@ -861,6 +861,485 @@
     }
   });
 
+  // --- Vistas: Registro y Panel -------------------------------------------------------------
+  // Cambiar de vista solo oculta la otra: un registro en curso queda tal como estaba.
+
+  var nodoPanel = document.getElementById('panel');
+
+  function cambiarVista(vista) {
+    document.querySelectorAll('[data-vista]').forEach(function (boton) {
+      boton.setAttribute('aria-pressed', String(boton.dataset.vista === vista));
+    });
+    document.getElementById('vista-registro').hidden = vista !== 'registro';
+    nodoPanel.hidden = vista !== 'panel';
+    window.scrollTo(0, 0);
+    if (vista === 'panel' && !panel.datos && !panel.cargando) cargarPanel();
+    (vista === 'panel' ? nodoPanel : document.getElementById('principal')).focus({ preventScroll: true });
+  }
+
+  document.querySelector('.vistas').addEventListener('click', function (evento) {
+    var boton = evento.target.closest('[data-vista]');
+    if (boton) cambiarVista(boton.dataset.vista);
+  });
+
+  // --- Panel de seguimiento -----------------------------------------------------------------
+  // obtenerPanel entrega todo de una vez; los filtros se aplican aquí con resumirPanel, la misma
+  // función de Codigo.gs (Index.html la incluye antes de este archivo).
+
+  var ETIQUETA_ACTA = { aprobada: 'Aprobada', borrador: 'Borrador', 'sin acta': 'Sin generar' };
+  var INICIAL_COLOR = { verde: 'V', amarillo: 'A', rojo: 'R' };
+  var RANGO_COLOR = { rojo: 0, amarillo: 1, verde: 2 };
+  var COLUMNAS_ESTADO = [
+    ['numero', 'N°'], ['proyecto', 'Proyecto'], ['dupla', 'Dupla'], ['curso', 'Curso'],
+    ['ultimaFecha', 'Última tutoría'], ['dias', 'Días']
+  ];
+
+  var panel = {
+    datos: null,
+    cargando: false,
+    error: '',
+    filtros: { semestre: '', curso: '', dupla: '', hito: '' },
+    filtrosIniciados: false,
+    orden: null, // null = rojos primero y más días sin tutoría; si no, {clave, ascendente}
+    equipo: null, // clave 'semestre|numero' del equipo abierto
+    buscarCompromisos: '',
+    buscarConsultas: ''
+  };
+
+  function cargarPanel() {
+    panel.cargando = true;
+    panel.error = '';
+    pintarPanel();
+    llamar('obtenerPanel').then(function (datosPanel) {
+      panel.datos = datosPanel;
+      panel.cargando = false;
+      if (!panel.filtrosIniciados) {
+        panel.filtros.semestre = datosPanel.semestres[0] || '';
+        panel.filtrosIniciados = true;
+      }
+      ajustarFiltros();
+      pintarPanel();
+    }).catch(function (error) {
+      panel.cargando = false;
+      panel.error = 'No se pudo cargar el panel: ' + mensajeDe(error);
+      pintarPanel();
+    });
+  }
+
+  /** Quita los filtros que ya no tienen opciones (por ejemplo, al cambiar de semestre). */
+  function ajustarFiltros() {
+    var f = panel.filtros;
+    if (f.semestre && panel.datos.semestres.indexOf(f.semestre) === -1) f.semestre = panel.datos.semestres[0] || '';
+    var opciones = resumirPanel(panel.datos, { semestre: f.semestre }).opciones;
+    if (opciones.cursos.indexOf(f.curso) === -1) f.curso = '';
+    if (opciones.duplas.indexOf(f.dupla) === -1) f.dupla = '';
+    if (!opciones.hitos.some(function (h) { return String(h.numero) === f.hito; })) f.hito = '';
+  }
+
+  function claveDelEquipo(semestre, numero) {
+    return semestre + '|' + numero;
+  }
+
+  function htmlColor(color, completo) {
+    if (!ETIQUETA_COLOR[color]) {
+      return '<span class="estado estado--sin" title="Sin dato">' +
+        (completo ? 'Sin dato' : '<span aria-hidden="true">–</span><span class="oculto">Sin dato</span>') + '</span>';
+    }
+    return '<span class="estado estado--' + color + '" title="' + ETIQUETA_COLOR[color] + '">' +
+      (completo ? ETIQUETA_COLOR[color] : '<span aria-hidden="true">' + INICIAL_COLOR[color] + '</span><span class="oculto">' + ETIQUETA_COLOR[color] + '</span>') + '</span>';
+  }
+
+  function encabezadosDimensiones() {
+    return panel.datos.dimensiones.map(function (d) {
+      return '<th scope="col" class="tabla__centro"><abbr title="' + escapar(d.nombre) + '">' + d.codigo + '</abbr></th>';
+    }).join('');
+  }
+
+  function celdasDimensiones(colores) {
+    return panel.datos.dimensiones.map(function (d) {
+      return '<td class="tabla__centro">' + htmlColor(colores[d.codigo]) + '</td>';
+    }).join('');
+  }
+
+  function htmlSelect(filtro, rotulo, todos, opciones) {
+    var actual = panel.filtros[filtro];
+    return '<div class="campo"><label for="filtro-' + filtro + '">' + rotulo + '</label>' +
+      '<select class="entrada" id="filtro-' + filtro + '" data-filtro="' + filtro + '">' +
+      '<option value=""' + (actual ? '' : ' selected') + '>' + todos + '</option>' +
+      opciones.map(function (o) {
+        return '<option value="' + escapar(o.valor) + '"' + (String(o.valor) === actual ? ' selected' : '') + '>' + escapar(o.texto) + '</option>';
+      }).join('') + '</select></div>';
+  }
+
+  function htmlFiltros(opciones) {
+    var lista = function (valores) {
+      return valores.map(function (v) { return { valor: v, texto: v }; });
+    };
+    return '<div class="filtros">' +
+      htmlSelect('semestre', 'Semestre', 'Todos los semestres', lista(panel.datos.semestres)) +
+      htmlSelect('curso', 'Curso', 'Todos los cursos', lista(opciones.cursos)) +
+      htmlSelect('dupla', 'Dupla', 'Todas las duplas', lista(opciones.duplas)) +
+      htmlSelect('hito', 'Hito', 'Todos los hitos', opciones.hitos.map(function (h) { return { valor: String(h.numero), texto: h.nombre }; })) +
+      '</div>' +
+      '<p class="panel__nota">El estado actual es siempre la última tutoría de cada equipo: las tarjetas, el estado de los equipos, ' +
+      'los problemas de hoy y las duplas no cambian con el filtro de hito. Ese filtro cambia la evolución, el historial y los compromisos y consultas.</p>';
+  }
+
+  function htmlTarjeta(valor, rotulo, detalle, alerta) {
+    return '<div class="indicador' + (alerta ? ' indicador--alerta' : '') + '">' +
+      '<span class="indicador__valor">' + valor + '</span>' +
+      '<span class="indicador__rotulo">' + rotulo + '</span>' +
+      (detalle ? '<span class="indicador__detalle">' + detalle + '</span>' : '') + '</div>';
+  }
+
+  function htmlTarjetas(resumen) {
+    var t = resumen.tarjetas;
+    return '<div class="indicadores">' +
+      htmlTarjeta(t.tutorias, 'Tutorías realizadas', '') +
+      htmlTarjeta(t.equiposConRojo, 'Equipos con rojo', 'en su última tutoría, de ' + t.equipos + ' equipos', t.equiposConRojo > 0) +
+      htmlTarjeta(t.sinTutoriaReciente, 'Sin tutoría en ' + panel.datos.diasSinTutoria + ' días', 'incluye los que no tienen ninguna', false) +
+      htmlTarjeta(t.actasAprobadas + '<span class="indicador__total"> / ' + t.tutorias + '</span>', 'Actas aprobadas', 'sobre el total de tutorías', false) +
+      '</div>';
+  }
+
+  // --- Estado de los equipos y detalle ------------------------------------------------------
+
+  function valorParaOrden(equipo, clave) {
+    if (clave === 'dias') return equipo.diasDesdeUltima === null ? Infinity : equipo.diasDesdeUltima;
+    if (clave === 'peor') return equipo.peor ? RANGO_COLOR[equipo.peor] : 3;
+    if (clave === 'numero') return equipo.numero;
+    return String(equipo[clave] || '').toLowerCase();
+  }
+
+  function equiposOrdenados(equipos) {
+    if (!panel.orden) return equipos;
+    var clave = panel.orden.clave;
+    var signo = panel.orden.ascendente ? 1 : -1;
+    return equipos.slice().sort(function (a, b) {
+      var x = valorParaOrden(a, clave);
+      var y = valorParaOrden(b, clave);
+      var comparacion = typeof x === 'string' ? x.localeCompare(y, 'es') : (x === y ? 0 : x < y ? -1 : 1);
+      return signo * comparacion || a.numero - b.numero;
+    });
+  }
+
+  function htmlEncabezadoOrdenable(clave, rotulo, clase) {
+    var activo = panel.orden && panel.orden.clave === clave;
+    var sentido = activo ? (panel.orden.ascendente ? 'ascending' : 'descending') : 'none';
+    return '<th scope="col"' + (clase ? ' class="' + clase + '"' : '') + ' aria-sort="' + sentido + '">' +
+      '<button type="button" class="tabla__orden" data-orden="' + clave + '">' + rotulo +
+      '<span aria-hidden="true">' + (activo ? (panel.orden.ascendente ? ' ▲' : ' ▼') : '') + '</span></button></th>';
+  }
+
+  function htmlEstado(resumen) {
+    var html = '<section class="panel__seccion" aria-labelledby="titulo-estado">' +
+      '<h2 class="seccion__titulo" id="titulo-estado">Estado de los equipos</h2>';
+    if (!resumen.equipos.length) {
+      return html + '<p class="texto-apoyo">No hay equipos activos con estos filtros.</p></section>';
+    }
+    html += '<p class="panel__ayuda">' + (panel.orden
+      ? 'Orden elegido. <button type="button" class="enlace" id="orden-inicial">Volver a rojos primero</button>'
+      : 'Rojos primero, después los que llevan más días sin tutoría.') + ' Toca un equipo para ver su historial.</p>' +
+      '<div class="tabla-contenedor"><table class="tabla"><thead><tr>' +
+      COLUMNAS_ESTADO.map(function (c, i) {
+        return htmlEncabezadoOrdenable(c[0], c[1], i === 0 ? 'tabla__fija' : c[0] === 'dias' ? 'tabla__numero' : '');
+      }).join('') + encabezadosDimensiones() + htmlEncabezadoOrdenable('peor', 'Peor', '') +
+      '</tr></thead><tbody>' +
+      equiposOrdenados(resumen.equipos).map(function (e) {
+        var clave = claveDelEquipo(e.semestre, e.numero);
+        var abierto = panel.equipo === clave;
+        return '<tr' + (abierto ? ' class="tabla__fila--abierta"' : '') + '>' +
+          '<th scope="row" class="tabla__fija"><button type="button" class="tabla__equipo" data-abrir-equipo="' + escapar(clave) + '" aria-expanded="' + abierto + '" aria-controls="detalle-equipo">' +
+          escapar(e.numero) + '</button></th>' +
+          '<td>' + escapar(e.proyecto) + '</td><td>' + escapar(e.dupla || 'Sin dupla') + '</td><td>' + escapar(e.curso) + '</td>' +
+          '<td>' + (e.ultimaFecha ? escapar(e.ultimaFecha) : '<span class="texto-apoyo">Ninguna</span>') + '</td>' +
+          '<td class="tabla__numero">' + (e.diasDesdeUltima === null ? '–' : escapar(e.diasDesdeUltima)) + '</td>' +
+          celdasDimensiones(e.colores) + '<td>' + htmlColor(e.peor, true) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    // El detalle se cierra solo si los filtros dejan fuera al equipo abierto.
+    var visible = resumen.equipos.some(function (e) { return claveDelEquipo(e.semestre, e.numero) === panel.equipo; });
+    return html + (visible ? htmlDetalle() : '') + '</section>';
+  }
+
+  function delEquipoAbierto(fila) {
+    return claveDelEquipo(fila.semestre, fila.equipoNumero) === panel.equipo &&
+      (!panel.filtros.hito || String(fila.hitoNumero) === panel.filtros.hito);
+  }
+
+  function enlaceSeguro(url) {
+    return /^https:\/\//.test(String(url || '')) ? url : '';
+  }
+
+  function htmlDetalle() {
+    if (!panel.equipo) return '';
+    var equipo = panel.datos.equipos.filter(function (e) { return claveDelEquipo(e.semestre, e.numero) === panel.equipo; })[0];
+    if (!equipo) return '';
+    var historial = panel.datos.tutorias.filter(delEquipoAbierto);
+    var compromisos = panel.datos.compromisos.filter(delEquipoAbierto);
+    var consultas = panel.datos.consultas.filter(delEquipoAbierto);
+    var hito = panel.filtros.hito ? ' (solo el hito elegido en los filtros)' : '';
+    var html = '<div class="tarjeta detalle" id="detalle-equipo" tabindex="-1" aria-labelledby="titulo-detalle">' +
+      '<div class="detalle__cabecera"><div><span class="rotulo">Equipo ' + escapar(equipo.numero) + '</span>' +
+      '<h3 class="detalle__titulo" id="titulo-detalle">' + escapar(equipo.proyecto) + '</h3>' +
+      '<p class="texto-apoyo">' + escapar(equipo.curso) + ' · ' + escapar(equipo.dupla || 'Sin dupla') + ' · semestre ' + escapar(equipo.semestre) + '</p></div>' +
+      '<button type="button" class="boton boton--neutro boton--chico" id="cerrar-detalle">Cerrar</button></div>' +
+      '<h4 class="detalle__subtitulo">Historial de tutorías' + hito + '</h4>';
+    if (!historial.length) {
+      html += '<p class="texto-apoyo">Sin tutorías registradas' + (hito ? ' en ese hito' : '') + '.</p>';
+    } else {
+      html += '<div class="tabla-contenedor"><table class="tabla"><thead><tr><th scope="col" class="tabla__fija">Fecha</th><th scope="col">Hito</th>' +
+        encabezadosDimensiones() + '<th scope="col">Acta</th></tr></thead><tbody>' +
+        historial.map(function (t) {
+          var url = enlaceSeguro(t.actaUrl);
+          return '<tr><th scope="row" class="tabla__fija">' + escapar(t.fecha) + '</th><td>' + escapar(t.hitoNombre) + '</td>' +
+            celdasDimensiones(t.colores) + '<td>' + escapar(ETIQUETA_ACTA[t.acta] || t.acta) +
+            (url ? ' · <a href="' + escapar(url) + '" target="_blank" rel="noopener">Abrir acta</a>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+    html += '<div class="rejilla-2 detalle__listas"><div><h4 class="detalle__subtitulo">Compromisos</h4>' +
+      (compromisos.length ? '<ul class="detalle__lista">' + compromisos.map(function (c) {
+        return '<li>' + escapar(c.descripcion) + ' <span class="texto-apoyo">· ' + escapar(c.responsable) + ' · ' + escapar(c.fecha) + '</span></li>';
+      }).join('') + '</ul>' : '<p class="texto-apoyo">Sin compromisos.</p>') + '</div>' +
+      '<div><h4 class="detalle__subtitulo">Consultas del equipo</h4>' +
+      (consultas.length ? '<ul class="detalle__lista">' + consultas.map(function (c) {
+        return '<li>' + escapar(c.pregunta) + (c.respuesta ? '<br><span class="texto-apoyo">Respuesta: ' + escapar(c.respuesta) + '</span>' : '') +
+          ' <span class="texto-apoyo">· ' + escapar(c.fecha) + '</span></li>';
+      }).join('') + '</ul>' : '<p class="texto-apoyo">Sin consultas.</p>') + '</div></div>';
+    return html + '</div>';
+  }
+
+  // --- Gráficos (CSS, sin librerías) --------------------------------------------------------
+
+  function htmlLeyenda(conSinDato) {
+    var items = ['verde', 'amarillo', 'rojo'].map(function (c) {
+      return '<span class="leyenda__item"><span class="leyenda__muestra leyenda__muestra--' + c + '"></span>' + ETIQUETA_COLOR[c] + '</span>';
+    });
+    if (conSinDato) items.push('<span class="leyenda__item"><span class="leyenda__muestra leyenda__muestra--sin"></span>Sin dato</span>');
+    return '<div class="leyenda" aria-hidden="true">' + items.join('') + '</div>';
+  }
+
+  function porcentaje(parte, total) {
+    return total ? Math.round((100 * parte) / total) : 0;
+  }
+
+  function htmlProblemas(resumen) {
+    var html = '<section class="panel__seccion" aria-labelledby="titulo-problemas">' +
+      '<h2 class="seccion__titulo" id="titulo-problemas">Dónde están los problemas hoy</h2>';
+    var total = resumen.equipos.length;
+    if (!total) return html + '<p class="texto-apoyo">No hay equipos activos con estos filtros.</p></section>';
+    var nombres = {};
+    panel.datos.dimensiones.forEach(function (d) { nombres[d.codigo] = d.nombre; });
+    html += '<p class="panel__ayuda">Cuántos equipos están en cada color en su última tutoría, de ' + total + ' equipos.</p>' + htmlLeyenda(true) +
+      '<div class="barras">' + resumen.problemas.map(function (p) {
+        var tramos = [['verde', p.verde], ['amarillo', p.amarillo], ['rojo', p.rojo], ['sin', p.sinDato]];
+        var texto = 'Verde ' + p.verde + ' · Amarillo ' + p.amarillo + ' · Rojo ' + p.rojo + ' · Sin dato ' + p.sinDato;
+        return '<div class="barras__fila"><div class="barras__rotulo"><strong>' + p.codigo + '</strong> ' + escapar(nombres[p.codigo]) + '</div>' +
+          '<div class="barra" role="img" aria-label="' + p.codigo + ': ' + texto + '">' +
+          tramos.filter(function (t) { return t[1] > 0; }).map(function (t) {
+            var ancho = (100 * t[1]) / total;
+            return '<span class="barra__tramo barra__tramo--' + t[0] + '" style="width:' + ancho + '%" title="' +
+              (t[0] === 'sin' ? 'Sin dato' : ETIQUETA_COLOR[t[0]]) + ': ' + t[1] + ' equipo(s)">' + (ancho >= 8 ? t[1] : '') + '</span>';
+          }).join('') + '</div>' +
+          '<div class="barras__cifras">' + texto + '</div></div>';
+      }).join('') + '</div>';
+    return html + '</section>';
+  }
+
+  function htmlEvolucion(resumen) {
+    var html = '<section class="panel__seccion" aria-labelledby="titulo-evolucion">' +
+      '<h2 class="seccion__titulo" id="titulo-evolucion">Evolución semanal</h2>';
+    if (!resumen.semanas.length) return html + '<p class="texto-apoyo">Sin tutorías para estos filtros.</p></section>';
+    html += '<p class="panel__ayuda">Por semana, la proporción de dimensiones en verde, amarillo y rojo de todas las tutorías de esa semana. Las dimensiones sin dato no cuentan.</p>' +
+      htmlLeyenda(false) + '<div class="evolucion">' +
+      resumen.semanas.map(function (s) {
+        var tramos = [['rojo', s.rojo], ['amarillo', s.amarillo], ['verde', s.verde]];
+        var texto = s.rotulo + ': ' + (s.total
+          ? porcentaje(s.verde, s.total) + ' % verde, ' + porcentaje(s.amarillo, s.total) + ' % amarillo, ' + porcentaje(s.rojo, s.total) + ' % rojo'
+          : 'sin dato') + ' (' + s.tutorias + ' tutoría(s))';
+        return '<div class="evolucion__semana"><div class="evolucion__columna" role="img" aria-label="' + escapar(texto) + '" title="' + escapar(texto) + '">' +
+          (s.total ? tramos.filter(function (t) { return t[1] > 0; }).map(function (t) {
+            var alto = (100 * t[1]) / s.total;
+            return '<span class="evolucion__tramo barra__tramo--' + t[0] + '" style="height:' + alto + '%">' + (alto >= 14 ? Math.round(alto) + '%' : '') + '</span>';
+          }).join('') : '<span class="evolucion__tramo barra__tramo--sin" style="height:100%">–</span>') + '</div>' +
+          '<span class="evolucion__rotulo">' + escapar(s.rotulo) + '</span>' +
+          '<span class="evolucion__n">' + s.tutorias + ' tut.</span></div>';
+      }).join('') + '</div>' +
+      '<details class="ver-tabla"><summary>Ver como tabla</summary><div class="tabla-contenedor"><table class="tabla"><thead><tr>' +
+      '<th scope="col" class="tabla__fija">Semana</th><th scope="col" class="tabla__numero">Tutorías</th><th scope="col" class="tabla__numero">Verde</th>' +
+      '<th scope="col" class="tabla__numero">Amarillo</th><th scope="col" class="tabla__numero">Rojo</th></tr></thead><tbody>' +
+      resumen.semanas.map(function (s) {
+        return '<tr><th scope="row" class="tabla__fija">' + escapar(s.rotulo) + '</th><td class="tabla__numero">' + s.tutorias + '</td>' +
+          ['verde', 'amarillo', 'rojo'].map(function (c) {
+            return '<td class="tabla__numero">' + (s.total ? porcentaje(s[c], s.total) + ' %' : '–') + '</td>';
+          }).join('') + '</tr>';
+      }).join('') + '</tbody></table></div></details>';
+    return html + '</section>';
+  }
+
+  // --- Duplas, compromisos y consultas ------------------------------------------------------
+
+  function htmlDuplas(resumen) {
+    var html = '<section class="panel__seccion" aria-labelledby="titulo-duplas">' +
+      '<h2 class="seccion__titulo" id="titulo-duplas">Duplas</h2>';
+    if (!resumen.duplas.length) return html + '<p class="texto-apoyo">No hay duplas con estos filtros.</p></section>';
+    return html + '<p class="panel__ayuda">La dupla de cada tutoría es la del equipo. El porcentaje en rojo se calcula sobre las dimensiones con dato de la última tutoría de cada equipo.</p>' +
+      '<div class="tabla-contenedor"><table class="tabla"><thead><tr><th scope="col" class="tabla__fija">Dupla</th>' +
+      '<th scope="col" class="tabla__numero">Equipos a cargo</th><th scope="col" class="tabla__numero">Tutorías</th>' +
+      '<th scope="col" class="tabla__numero">Sin tutoría en ' + panel.datos.diasSinTutoria + ' días</th>' +
+      '<th scope="col" class="tabla__numero">Dimensiones en rojo</th><th scope="col" class="tabla__numero">Actas pendientes</th></tr></thead><tbody>' +
+      resumen.duplas.map(function (d) {
+        return '<tr><th scope="row" class="tabla__fija">' + escapar(d.dupla || 'Sin dupla') + '</th>' +
+          '<td class="tabla__numero">' + d.equipos + '</td><td class="tabla__numero">' + d.tutorias + '</td>' +
+          '<td class="tabla__numero">' + d.sinTutoriaReciente + '</td>' +
+          '<td class="tabla__numero">' + (d.porcentajeRojo === null ? '–' : d.porcentajeRojo + ' %') + '</td>' +
+          '<td class="tabla__numero">' + d.actasPendientes + '</td></tr>';
+      }).join('') + '</tbody></table></div></section>';
+  }
+
+  function coincideBusqueda(fila, campos, busqueda) {
+    var texto = claveNombre(busqueda);
+    if (!texto) return true;
+    return claveNombre(campos.map(function (c) { return fila[c]; }).join(' ')).indexOf(texto) !== -1;
+  }
+
+  function htmlTablaCompromisos(resumen) {
+    var filas = resumen.compromisos.filter(function (c) {
+      return coincideBusqueda(c, ['equipoNumero', 'equipoProyecto', 'hitoNombre', 'descripcion', 'responsable'], panel.buscarCompromisos);
+    });
+    if (!filas.length) return '<p class="texto-apoyo">' + (resumen.compromisos.length ? 'Ningún compromiso coincide con la búsqueda.' : 'Sin compromisos para estos filtros.') + '</p>';
+    return '<div class="tabla-contenedor"><table class="tabla"><thead><tr><th scope="col" class="tabla__fija">Fecha</th><th scope="col">Equipo</th>' +
+      '<th scope="col">Hito</th><th scope="col">Compromiso</th><th scope="col">Responsable</th></tr></thead><tbody>' +
+      filas.map(function (c) {
+        return '<tr><th scope="row" class="tabla__fija">' + escapar(c.fecha) + '</th><td>' + escapar(c.equipoNumero) + ' · ' + escapar(c.equipoProyecto) + '</td>' +
+          '<td>' + escapar(c.hitoNombre) + '</td><td class="tabla__texto">' + escapar(c.descripcion) + '</td><td>' + escapar(c.responsable) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+
+  function htmlTablaConsultas(resumen) {
+    var filas = resumen.consultas.filter(function (c) {
+      return coincideBusqueda(c, ['equipoNumero', 'equipoProyecto', 'hitoNombre', 'pregunta', 'respuesta'], panel.buscarConsultas);
+    });
+    if (!filas.length) return '<p class="texto-apoyo">' + (resumen.consultas.length ? 'Ninguna consulta coincide con la búsqueda.' : 'Sin consultas para estos filtros.') + '</p>';
+    return '<div class="tabla-contenedor"><table class="tabla"><thead><tr><th scope="col" class="tabla__fija">Fecha</th><th scope="col">Equipo</th>' +
+      '<th scope="col">Hito</th><th scope="col">Consulta del equipo</th><th scope="col">Respuesta del tutor</th></tr></thead><tbody>' +
+      filas.map(function (c) {
+        return '<tr><th scope="row" class="tabla__fija">' + escapar(c.fecha) + '</th><td>' + escapar(c.equipoNumero) + ' · ' + escapar(c.equipoProyecto) + '</td>' +
+          '<td>' + escapar(c.hitoNombre) + '</td><td class="tabla__texto">' + escapar(c.pregunta) + '</td>' +
+          '<td class="tabla__texto">' + (c.respuesta ? escapar(c.respuesta) : '<span class="texto-apoyo">Sin respuesta</span>') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+
+  function htmlCompromisosYConsultas(resumen) {
+    return '<section class="panel__seccion" aria-labelledby="titulo-compromisos-panel">' +
+      '<h2 class="seccion__titulo" id="titulo-compromisos-panel">Compromisos y consultas</h2>' +
+      '<h3 class="detalle__subtitulo">Compromisos</h3>' +
+      '<div class="campo panel__buscar"><label for="buscar-compromisos">Buscar en compromisos</label>' +
+      '<input class="entrada" id="buscar-compromisos" type="search" placeholder="Equipo, texto o responsable" value="' + escapar(panel.buscarCompromisos) + '"></div>' +
+      '<div id="tabla-compromisos">' + htmlTablaCompromisos(resumen) + '</div>' +
+      '<h3 class="detalle__subtitulo">Consultas del equipo</h3>' +
+      '<div class="campo panel__buscar"><label for="buscar-consultas">Buscar en consultas</label>' +
+      '<input class="entrada" id="buscar-consultas" type="search" placeholder="Equipo, pregunta o respuesta" value="' + escapar(panel.buscarConsultas) + '"></div>' +
+      '<div id="tabla-consultas">' + htmlTablaConsultas(resumen) + '</div></section>';
+  }
+
+  // --- Pintar el panel ----------------------------------------------------------------------
+
+  function resumenActual() {
+    var f = panel.filtros;
+    return resumirPanel(panel.datos, { semestre: f.semestre, curso: f.curso, dupla: f.dupla, hito: f.hito });
+  }
+
+  function htmlPanel() {
+    var html = '<div class="panel__cabecera"><div><h1 class="paso__titulo">Panel de seguimiento</h1>' +
+      '<p class="paso__ayuda">' + (panel.datos ? 'Calculado con la planilla el ' + escapar(panel.datos.hoy) + '.' : 'Estado de los equipos a partir de la planilla.') + '</p></div>' +
+      '<button type="button" class="boton boton--secundario" id="actualizar-panel"' + (panel.cargando ? ' disabled' : '') + '>' +
+      (panel.cargando ? 'Actualizando...' : 'Actualizar') + '</button></div>';
+    if (panel.error) html += '<div class="aviso aviso--error" role="alert">' + escapar(panel.error) + '</div>';
+    if (!panel.datos) {
+      return html + (panel.cargando ? '<div class="cargando" role="status"><span class="giro"></span>Leyendo la planilla...</div>' : '');
+    }
+    if (!panel.datos.equipos.length && !panel.datos.tutorias.length) {
+      return html + '<div class="aviso aviso--info">La planilla todavía no tiene equipos activos ni tutorías. Cuando coordinación cargue la pestaña Equipos y se guarde la primera tutoría, el panel se llena.</div>';
+    }
+    var resumen = resumenActual();
+    html += htmlFiltros(resumen.opciones);
+    if (!panel.datos.tutorias.length) {
+      html += '<div class="aviso aviso--info">Todavía no hay tutorías registradas. Mientras tanto, todos los equipos aparecen sin tutoría.</div>';
+    } else if (!resumen.equipos.length && !resumen.tarjetas.tutorias) {
+      return html + '<div class="aviso aviso--info">Ningún equipo ni tutoría coincide con estos filtros.</div>' +
+        '<button type="button" class="boton boton--neutro" id="quitar-filtros">Quitar filtros</button>';
+    }
+    return html + htmlTarjetas(resumen) + htmlEstado(resumen) + htmlProblemas(resumen) + htmlEvolucion(resumen) +
+      htmlDuplas(resumen) + htmlCompromisosYConsultas(resumen);
+  }
+
+  function pintarPanel() {
+    // Repintar no debe perder el foco del control que se estaba usando.
+    var enfocado = document.activeElement && nodoPanel.contains(document.activeElement) ? document.activeElement : null;
+    var idEnfocado = enfocado && enfocado.id;
+    var abrirEquipo = enfocado && enfocado.dataset.abrirEquipo;
+    var orden = enfocado && enfocado.dataset.orden;
+    nodoPanel.innerHTML = '<div class="panel__marco">' + htmlPanel() + '</div>';
+    var nuevo = idEnfocado ? document.getElementById(idEnfocado)
+      : abrirEquipo ? nodoPanel.querySelector('[data-abrir-equipo="' + CSS.escape(abrirEquipo) + '"]')
+      : orden ? nodoPanel.querySelector('[data-orden="' + CSS.escape(orden) + '"]') : null;
+    if (nuevo && !nuevo.disabled) nuevo.focus({ preventScroll: true });
+  }
+
+  nodoPanel.addEventListener('change', function (evento) {
+    var filtro = evento.target.dataset.filtro;
+    if (!filtro) return;
+    panel.filtros[filtro] = evento.target.value;
+    if (filtro === 'semestre') ajustarFiltros();
+    pintarPanel();
+  });
+
+  nodoPanel.addEventListener('input', function (evento) {
+    var objetivo = evento.target;
+    if (objetivo.id === 'buscar-compromisos') {
+      panel.buscarCompromisos = objetivo.value;
+      document.getElementById('tabla-compromisos').innerHTML = htmlTablaCompromisos(resumenActual());
+    } else if (objetivo.id === 'buscar-consultas') {
+      panel.buscarConsultas = objetivo.value;
+      document.getElementById('tabla-consultas').innerHTML = htmlTablaConsultas(resumenActual());
+    }
+  });
+
+  nodoPanel.addEventListener('click', function (evento) {
+    var boton = evento.target.closest('button');
+    if (!boton || boton.disabled) return;
+    var d = boton.dataset;
+    if (boton.id === 'actualizar-panel') {
+      cargarPanel();
+    } else if (boton.id === 'quitar-filtros') {
+      panel.filtros = { semestre: panel.datos.semestres[0] || '', curso: '', dupla: '', hito: '' };
+      pintarPanel();
+    } else if (d.orden) {
+      var mismo = panel.orden && panel.orden.clave === d.orden;
+      // Los días y el peor color empiezan por lo más urgente.
+      var inicial = d.orden !== 'dias';
+      panel.orden = { clave: d.orden, ascendente: mismo ? !panel.orden.ascendente : inicial };
+      pintarPanel();
+    } else if (boton.id === 'orden-inicial') {
+      panel.orden = null;
+      pintarPanel();
+    } else if (d.abrirEquipo) {
+      panel.equipo = panel.equipo === d.abrirEquipo ? null : d.abrirEquipo;
+      pintarPanel();
+      var detalle = document.getElementById('detalle-equipo');
+      if (detalle) {
+        detalle.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        detalle.focus({ preventScroll: true });
+      }
+    } else if (boton.id === 'cerrar-detalle') {
+      var clave = panel.equipo;
+      panel.equipo = null;
+      pintarPanel();
+      var fila = nodoPanel.querySelector('[data-abrir-equipo="' + CSS.escape(clave) + '"]');
+      if (fila) fila.focus();
+    }
+  });
+
   // --- Arranque -----------------------------------------------------------------------------
 
   llamar('obtenerDatosIniciales').then(function (respuesta) {

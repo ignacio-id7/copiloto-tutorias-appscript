@@ -352,4 +352,159 @@
   }
   @keyframes giro { to { transform: rotate(360deg); } }
   .marca-modelo { font-size: var(--texto-xs); color: var(--color-texto-suave); margin-top: var(--espacio-1); }
+
+  /* Solo para lectores de pantalla. */
+  .oculto {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+    clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
+
+  /* --- Cabecera: Registro y Panel --------------------------------------------------- */
+  .cabecera { flex-wrap: wrap; }
+  .cabecera__derecha { display: flex; align-items: center; gap: var(--espacio-3); flex-wrap: wrap; }
+  .vistas {
+    display: inline-flex; padding: 3px; gap: 2px;
+    border: 1px solid var(--color-borde-fuerte); border-radius: var(--radio-chip); background: var(--color-fondo);
+  }
+  .vistas__boton {
+    min-height: 38px; padding: var(--espacio-1) var(--espacio-4); border: 0; border-radius: var(--radio-chip);
+    background: transparent; color: var(--color-texto-suave); font-weight: 600; cursor: pointer;
+    transition: background var(--transicion), color var(--transicion);
+  }
+  .vistas__boton:hover { color: var(--color-texto); }
+  .vistas__boton[aria-pressed="true"] { background: var(--color-acento); color: var(--color-sobre-acento); }
+
+  /* --- Panel de seguimiento --------------------------------------------------------- */
+  .panel:focus { outline: none; }
+  .panel__marco { width: 100%; max-width: 80rem; margin: 0 auto; padding: var(--espacio-4) var(--espacio-4) var(--espacio-7); }
+  @media (min-width: 64rem) { .panel__marco { padding: var(--espacio-6) var(--espacio-6) var(--espacio-7); } }
+  .panel__cabecera { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--espacio-3); }
+  .panel__cabecera .paso__ayuda { margin-bottom: var(--espacio-4); }
+  .panel__nota, .panel__ayuda { font-size: var(--texto-sm); color: var(--color-texto-suave); margin: 0 0 var(--espacio-4); }
+  .panel__nota { border-left: 3px solid var(--color-borde-fuerte); padding-left: var(--espacio-3); }
+  .panel__seccion { margin-top: var(--espacio-7); }
+  .panel__buscar { max-width: 28rem; }
+  .enlace {
+    background: none; border: 0; padding: 0; cursor: pointer; font-weight: 600;
+    color: var(--color-acento-texto); text-decoration: underline; text-underline-offset: 3px;
+  }
+
+  .filtros { display: grid; gap: var(--espacio-3); grid-template-columns: 1fr 1fr; }
+  @media (min-width: 64rem) { .filtros { grid-template-columns: repeat(4, 1fr); } }
+  .filtros .campo { margin: 0; min-width: 0; }
+  .filtros select.entrada { min-height: var(--alto-tactil); padding: var(--espacio-2) var(--espacio-3); width: 100%; }
+  .filtros + .panel__nota { margin-top: var(--espacio-4); }
+
+  /* Tarjetas de cifras: dos por fila en el teléfono, cuatro en computador. */
+  .indicadores { display: grid; gap: var(--espacio-3); grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: var(--espacio-5); }
+  @media (min-width: 64rem) { .indicadores { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--espacio-4); } }
+  .indicador {
+    display: flex; flex-direction: column; gap: var(--espacio-1); padding: var(--espacio-4);
+    background: var(--color-superficie-solida); border: 1px solid var(--color-borde); border-radius: var(--radio);
+  }
+  .indicador--alerta { border-left: 6px solid var(--color-rojo); }
+  .indicador__valor { font-size: var(--texto-xl); font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .indicador__total { font-size: var(--texto-md); font-weight: 400; color: var(--color-texto-suave); }
+  .indicador__rotulo { font-weight: 600; font-size: var(--texto-sm); }
+  .indicador__detalle { font-size: var(--texto-xs); color: var(--color-texto-suave); }
+
+  /* Tablas: desplazamiento horizontal dentro de su contenedor y la primera columna fija. */
+  .tabla-contenedor {
+    overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%;
+    background: var(--color-superficie-solida); border: 1px solid var(--color-borde); border-radius: var(--radio);
+  }
+  .tabla { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--texto-sm); }
+  .tabla th, .tabla td {
+    padding: var(--espacio-2) var(--espacio-3); text-align: left; vertical-align: middle; white-space: nowrap;
+    border-bottom: 1px solid rgba(160, 170, 181, 0.15);
+  }
+  .tabla thead th {
+    font-size: var(--texto-xs); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--color-texto-suave); background: var(--color-superficie-solida);
+  }
+  .tabla tbody tr:last-child > * { border-bottom: 0; }
+  .tabla tbody th { font-weight: 600; }
+  .tabla__fija { position: sticky; left: 0; z-index: 1; background: var(--color-superficie-solida); box-shadow: 1px 0 0 rgba(160, 170, 181, 0.2); }
+  .tabla__numero { text-align: right !important; font-variant-numeric: tabular-nums; }
+  .tabla__centro { text-align: center !important; }
+  .tabla__texto { white-space: normal !important; min-width: 16rem; max-width: 32rem; }
+  .tabla abbr { text-decoration: none; cursor: help; }
+  .tabla__orden {
+    background: none; border: 0; padding: var(--espacio-1) 0; cursor: pointer; color: inherit;
+    font: inherit; letter-spacing: inherit; text-transform: inherit; white-space: nowrap;
+  }
+  .tabla__orden:hover { color: var(--color-texto); }
+  .tabla__equipo {
+    min-width: var(--alto-tactil); min-height: 36px; padding: var(--espacio-1) var(--espacio-3); cursor: pointer;
+    border-radius: var(--radio-chip); border: 1.5px solid var(--color-borde-fuerte); background: var(--color-fondo);
+    font-weight: 800; color: var(--color-texto);
+  }
+  .tabla__equipo:hover, .tabla__equipo[aria-expanded="true"] { border-color: var(--color-texto); }
+  .tabla__fila--abierta > * { background: #131b2c; }
+
+  /* Estado de una dimensión: color, inicial y texto oculto; nunca solo el color. */
+  .estado {
+    position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 26px;
+    padding: 0 var(--espacio-2); border-radius: 6px; font-size: var(--texto-xs); font-weight: 800;
+    color: var(--color-sobre-semaforo); background: var(--color-gris);
+  }
+  .estado--verde { background: var(--color-verde); }
+  .estado--amarillo { background: var(--color-amarillo); }
+  .estado--rojo { background: var(--color-rojo); }
+  .estado--sin { background: transparent; border: 1px dashed var(--color-gris); color: var(--color-texto-suave); }
+
+  .detalle { margin-top: var(--espacio-4); }
+  .detalle:focus { outline: none; box-shadow: 0 0 0 2px var(--color-foco); }
+  .detalle__cabecera { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--espacio-3); }
+  .detalle__cabecera .rotulo { display: block; margin-bottom: var(--espacio-1); }
+  .detalle__cabecera .texto-apoyo { margin: var(--espacio-1) 0 0; }
+  .detalle__titulo { font-size: var(--texto-md); font-weight: 800; }
+  .detalle__subtitulo { font-size: var(--texto-base); font-weight: 600; margin: var(--espacio-5) 0 var(--espacio-3); }
+  .detalle__listas { gap: var(--espacio-5); }
+  .detalle__lista { margin: 0; padding-left: 1.25rem; display: grid; gap: var(--espacio-2); font-size: var(--texto-sm); }
+
+  /* Gráficos hechos con CSS. Los tramos llevan una separación de 2px del color de la superficie. */
+  .leyenda { display: flex; flex-wrap: wrap; gap: var(--espacio-2) var(--espacio-4); margin-bottom: var(--espacio-4); font-size: var(--texto-xs); color: var(--color-texto-suave); }
+  .leyenda__item { display: inline-flex; align-items: center; gap: var(--espacio-2); }
+  .leyenda__muestra { width: 12px; height: 12px; border-radius: 3px; background: var(--color-gris); }
+  .leyenda__muestra--verde { background: var(--color-verde); }
+  .leyenda__muestra--amarillo { background: var(--color-amarillo); }
+  .leyenda__muestra--rojo { background: var(--color-rojo); }
+
+  .barras { display: grid; gap: var(--espacio-4); }
+  .barras__fila { display: grid; gap: var(--espacio-1); }
+  @media (min-width: 48rem) {
+    .barras__fila { grid-template-columns: 14rem minmax(0, 1fr); column-gap: var(--espacio-4); align-items: center; }
+    .barras__cifras { grid-column: 2; }
+  }
+  .barras__rotulo { font-size: var(--texto-sm); }
+  .barras__rotulo strong { color: var(--color-acento-texto); margin-right: var(--espacio-1); }
+  .barras__cifras { font-size: var(--texto-xs); color: var(--color-texto-suave); }
+  .barra { display: flex; gap: 2px; height: 28px; }
+  .barra__tramo {
+    display: flex; align-items: center; justify-content: center; min-width: 4px; border-radius: 4px;
+    font-size: var(--texto-xs); font-weight: 800; color: var(--color-sobre-semaforo); background: var(--color-gris);
+    overflow: hidden; white-space: nowrap;
+  }
+  .barra__tramo--verde { background: var(--color-verde); }
+  .barra__tramo--amarillo { background: var(--color-amarillo); }
+  .barra__tramo--rojo { background: var(--color-rojo); }
+  .barra__tramo--sin { background: var(--color-gris); color: var(--color-texto); }
+
+  .evolucion {
+    display: flex; gap: var(--espacio-3); overflow-x: auto; padding-bottom: var(--espacio-2);
+    -webkit-overflow-scrolling: touch;
+  }
+  .evolucion__semana { flex: 0 0 4rem; display: flex; flex-direction: column; align-items: center; gap: var(--espacio-1); }
+  .evolucion__columna { width: 100%; height: 11rem; display: flex; flex-direction: column; gap: 2px; }
+  .evolucion__tramo { border-radius: 4px; }
+  .evolucion__columna .evolucion__tramo {
+    display: flex; align-items: center; justify-content: center; min-height: 3px;
+    font-size: var(--texto-xs); font-weight: 800; color: var(--color-sobre-semaforo);
+  }
+  .evolucion__rotulo { font-size: var(--texto-xs); font-weight: 600; white-space: nowrap; }
+  .evolucion__n { font-size: var(--texto-xs); color: var(--color-texto-suave); }
+  .ver-tabla { margin-top: var(--espacio-4); font-size: var(--texto-sm); }
+  .ver-tabla summary { cursor: pointer; color: var(--color-acento-texto); font-weight: 600; min-height: var(--alto-tactil); display: flex; align-items: center; }
+  .ver-tabla .tabla-contenedor { margin-top: var(--espacio-2); }
 </style>
