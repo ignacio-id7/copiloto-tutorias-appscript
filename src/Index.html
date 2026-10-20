@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <?!= incluir('Estilos'); ?>
+  </head>
+  <body>
+    <header class="cabecera">
+      <div class="marca">
+        <span class="marca__rotulo">Impulsa DIE</span>
+        <span class="marca__nombre">Copiloto de Tutorías</span>
+      </div>
+      <span class="chip-semestre" id="semestre" hidden></span>
+    </header>
+
+    <div class="marco">
+      <nav class="lateral" aria-label="Pasos del registro">
+        <ol class="pasos-lista" id="pasos-lista"></ol>
+      </nav>
+
+      <main id="principal" tabindex="-1">
+        <div class="avance-movil" aria-hidden="true">
+          <div class="avance-movil__texto" id="avance-texto"></div>
+          <div class="tramos" id="tramos"></div>
+        </div>
+        <div id="contenido">
+          <div class="cargando"><span class="giro"></span>Cargando equipos y preguntas...</div>
+        </div>
+      </main>
+    </div>
+
+    <?!= incluir('Cliente'); ?>
+  </body>
+</html>

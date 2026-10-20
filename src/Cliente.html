@@ -1,0 +1,618 @@
+<script>
+  // JavaScript del navegador. Habla con Codigo.gs por google.script.run; el estado del
+  // registro vive en `estado` y cada paso se dibuja de nuevo con pintar().
+
+  var PASOS = ['Quiénes', 'Equipo e hito', 'Preguntas', 'Semáforo y acta'];
+  var ETIQUETA_COLOR = { verde: 'Verde', amarillo: 'Amarillo', rojo: 'Rojo' };
+  var CLAVE_TUTORES = 'copiloto.tutores';
+  var MAXIMO_RESPUESTA_PROPIA = 300;
+
+  var datos = null;
+  var estado = estadoInicial(leerTutoresRecordados());
+
+  function estadoInicial(tutores) {
+    return {
+      paso: 1,
+      conduce: tutores.conduce,
+      registra: tutores.registra,
+      equipoNumero: null,
+      hitoNumero: null,
+      filtro: '',
+      respuestas: {},
+      descartadas: 0,
+      tutoriaId: null,
+      semaforo: null,
+      acta: null,
+      fase: 'inicio', // inicio | generando | borrador | aprobando | aprobada
+      observaciones: '',
+      documento: null,
+      error: ''
+    };
+  }
+
+  // --- Utilidades ---------------------------------------------------------------------------
+
+  function llamar(nombre) {
+    var argumentos = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolver, rechazar) {
+      var corredor = google.script.run.withSuccessHandler(resolver).withFailureHandler(rechazar);
+      corredor[nombre].apply(corredor, argumentos);
+    });
+  }
+
+  function escapar(texto) {
+    return String(texto == null ? '' : texto)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function mensajeDe(error) {
+    return (error && error.message ? error.message : String(error)).replace(/^Error:\s*/, '');
+  }
+
+  function claveNombre(nombre, apellido) {
+    return (nombre + ' ' + apellido).replace(/\s+/g, ' ').trim().toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '');
+  }
+
+  function leerTutoresRecordados() {
+    var vacio = { conduce: { nombre: '', apellido: '' }, registra: { nombre: '', apellido: '' } };
+    try {
+      var guardado = JSON.parse(localStorage.getItem(CLAVE_TUTORES) || 'null');
+      if (guardado && guardado.conduce && guardado.registra) return guardado;
+    } catch (error) {}
+    return vacio;
+  }
+
+  function recordarTutores() {
+    try {
+      localStorage.setItem(CLAVE_TUTORES, JSON.stringify({ conduce: estado.conduce, registra: estado.registra }));
+    } catch (error) {}
+  }
+
+  function equipoElegido() {
+    return datos.equipos.filter(function (e) { return e.numero === estado.equipoNumero; })[0] || null;
+  }
+
+  function hitosDelEquipo(equipo) {
+    return equipo && datos.hitosPorCurso[equipo.curso] ? datos.hitosPorCurso[equipo.curso].hitos : [];
+  }
+
+  function hitoElegido() {
+    return hitosDelEquipo(equipoElegido()).filter(function (h) { return h.numero === estado.hitoNumero; })[0] || null;
+  }
+
+  function guion() {
+    var equipo = equipoElegido();
+    if (!equipo || estado.hitoNumero === null) return [];
+    return datos.guiones[equipo.curso + '|' + estado.hitoNumero] || [];
+  }
+
+  function respondida(clave) {
+    var r = estado.respuestas[clave];
+    if (!r) return false;
+    return r.otro ? Boolean(r.texto.trim() && r.color) : true;
+  }
+
+  function colorDe(pregunta) {
+    var r = estado.respuestas[pregunta.clave];
+    if (!r) return '';
+    if (r.otro) return r.color;
+    return pregunta.alternativas[r.indice] ? pregunta.alternativas[r.indice].color : '';
+  }
+
+  function aprobada() {
+    return estado.fase === 'aprobada';
+  }
+
+  // --- Navegación ---------------------------------------------------------------------------
+
+  function pintarNavegacion() {
+    document.getElementById('pasos-lista').innerHTML = PASOS.map(function (nombre, i) {
+      var numero = i + 1;
+      var clase = numero < estado.paso ? 'hecho' : numero === estado.paso ? 'actual' : 'pendiente';
+      var marca = numero < estado.paso ? '✓' : String(numero);
+      return '<li class="pasos-lista__item pasos-lista__item--' + clase + '"' +
+        (numero === estado.paso ? ' aria-current="step"' : '') + '>' +
+        '<span class="pasos-lista__marca" aria-hidden="true">' + marca + '</span>' + escapar(nombre) + '</li>';
+    }).join('');
+    document.getElementById('avance-texto').textContent =
+      'Paso ' + estado.paso + ' de ' + PASOS.length + ' · ' + PASOS[estado.paso - 1];
+    document.getElementById('tramos').innerHTML = PASOS.map(function (_, i) {
+      var numero = i + 1;
+      var clase = numero < estado.paso ? 'tramo--hecho' : numero === estado.paso ? 'tramo--actual' : '';
+      return '<span class="tramo ' + clase + '"></span>';
+    }).join('');
+  }
+
+  function irA(paso) {
+    estado.paso = paso;
+    estado.error = '';
+    pintar();
+    window.scrollTo(0, 0);
+    document.getElementById('principal').focus({ preventScroll: true });
+  }
+
+  function pintar() {
+    pintarNavegacion();
+    var contenido = document.getElementById('contenido');
+    contenido.innerHTML = [null, htmlPaso1, htmlPaso2, htmlPaso3, htmlPaso4][estado.paso]();
+    if (estado.paso === 2) pintarEquipos();
+    if (estado.paso === 3) actualizarCuentas();
+  }
+
+  function htmlError() {
+    return estado.error ? '<div class="aviso aviso--error" role="alert">' + escapar(estado.error) + '</div>' : '';
+  }
+
+  // --- Paso 1: quiénes ----------------------------------------------------------------------
+
+  function htmlTutor(rol, titulo) {
+    var t = estado[rol];
+    return '<fieldset class="tarjeta"><legend>' + titulo + '</legend>' +
+      '<div class="campo"><label for="' + rol + '-nombre">Nombre</label>' +
+      '<input class="entrada" id="' + rol + '-nombre" data-rol="' + rol + '" data-parte="nombre" autocomplete="off" maxlength="120" value="' + escapar(t.nombre) + '"></div>' +
+      '<div class="campo"><label for="' + rol + '-apellido">Apellido</label>' +
+      '<input class="entrada" id="' + rol + '-apellido" data-rol="' + rol + '" data-parte="apellido" autocomplete="off" maxlength="120" value="' + escapar(t.apellido) + '"></div>' +
+      '</fieldset>';
+  }
+
+  function htmlPaso1() {
+    return '<form id="form-paso1" novalidate>' +
+      '<h1 class="paso__titulo">¿Quiénes hacen la tutoría?</h1>' +
+      '<p class="paso__ayuda">Nombre y apellido de cada tutor; este navegador los recuerda para la próxima vez</p>' +
+      '<div class="rejilla-2">' + htmlTutor('conduce', 'Conduce la reunión') + htmlTutor('registra', 'Toma notas') + '</div>' +
+      htmlError() +
+      '<div class="acciones"><span></span><button type="submit" class="boton boton--primario">Siguiente</button></div>' +
+      '</form>';
+  }
+
+  function validarPaso1() {
+    var faltan = ['conduce', 'registra'].some(function (rol) {
+      return !estado[rol].nombre.trim() || !estado[rol].apellido.trim();
+    });
+    if (faltan) return 'Completa nombre y apellido de los dos tutores.';
+    if (claveNombre(estado.conduce.nombre, estado.conduce.apellido) ===
+        claveNombre(estado.registra.nombre, estado.registra.apellido)) {
+      return 'Quien conduce y quien toma notas deben ser personas distintas.';
+    }
+    return '';
+  }
+
+  // --- Paso 2: equipo e hito ----------------------------------------------------------------
+
+  function htmlPaso2() {
+    var equipo = equipoElegido();
+    var html = '<h1 class="paso__titulo">¿Qué equipo y qué hito?</h1>' +
+      '<p class="paso__ayuda">Los equipos y los hitos salen de la planilla de Impulsa</p>' +
+      '<div class="campo"><label for="filtro-equipos">Buscar equipo</label>' +
+      '<input class="entrada" id="filtro-equipos" type="search" placeholder="Número o nombre del proyecto" value="' + escapar(estado.filtro) + '"></div>' +
+      '<div class="equipos" id="equipos" role="group" aria-label="Equipos"></div>';
+    if (equipo) {
+      html += '<div class="tarjeta"><span class="rotulo">Equipo ' + equipo.numero + '</span>' +
+        '<p style="margin:0 0 var(--espacio-4)"><strong>' + escapar(equipo.nombre) + '</strong> · ' + escapar(equipo.curso) + '</p>' +
+        '<span class="rotulo">Hito en curso</span><div class="chips" role="group" aria-label="Hito">' +
+        hitosDelEquipo(equipo).map(function (h) {
+          return '<button type="button" class="chip" data-hito="' + h.numero + '" aria-pressed="' + (h.numero === estado.hitoNumero) + '">' +
+            escapar(h.nombre) + (h.fecha ? '<span class="chip__fecha">' + escapar(h.fecha) + '</span>' : '') + '</button>';
+        }).join('') + '</div></div>';
+    }
+    if (estado.tutoriaId && !aprobada()) {
+      html += '<div class="aviso aviso--info">Esta tutoría ya está guardada. Si cambias equipo o hito, al guardar de nuevo se reemplaza la misma fila de la planilla.</div>';
+    }
+    return html + htmlError() +
+      '<div class="acciones"><button type="button" class="boton boton--neutro" data-ir="1">Atrás</button>' +
+      '<button type="button" class="boton boton--primario" id="siguiente-2"' + (equipo && hitoElegido() ? '' : ' disabled') + '>Siguiente</button></div>';
+  }
+
+  function pintarEquipos() {
+    var filtro = estado.filtro.trim().toLowerCase();
+    var visibles = datos.equipos.filter(function (e) {
+      return !filtro || String(e.numero) === filtro || (e.numero + ' ' + e.nombre + ' ' + e.curso).toLowerCase().indexOf(filtro) !== -1;
+    });
+    var contenedor = document.getElementById('equipos');
+    if (!datos.equipos.length) {
+      contenedor.innerHTML = '<div class="aviso aviso--info">La pestaña Equipos de la planilla está vacía.</div>';
+      return;
+    }
+    contenedor.innerHTML = visibles.length ? visibles.map(function (e) {
+      return '<button type="button" class="opcion-equipo" data-equipo="' + e.numero + '" aria-pressed="' + (e.numero === estado.equipoNumero) + '">' +
+        '<span class="opcion-equipo__numero">Equipo ' + e.numero + '</span><span>' + escapar(e.nombre) + '</span>' +
+        '<span class="opcion-equipo__curso">' + escapar(e.curso) + '</span></button>';
+    }).join('') : '<p class="texto-apoyo">Ningún equipo coincide con la búsqueda.</p>';
+  }
+
+  function elegirEquipo(numero) {
+    estado.equipoNumero = numero;
+    var equipo = equipoElegido();
+    var hitos = hitosDelEquipo(equipo);
+    var vigente = hitos.some(function (h) { return h.numero === estado.hitoNumero; });
+    if (!vigente) estado.hitoNumero = datos.hitosPorCurso[equipo.curso] ? datos.hitosPorCurso[equipo.curso].sugerido : null;
+    pintar();
+  }
+
+  /** Al pasar al paso 3, se quitan las respuestas que no están en el guion nuevo. */
+  function ajustarRespuestasAlGuion() {
+    var claves = guion().map(function (p) { return p.clave; });
+    var quitadas = 0;
+    Object.keys(estado.respuestas).forEach(function (clave) {
+      if (claves.indexOf(clave) === -1) {
+        delete estado.respuestas[clave];
+        quitadas++;
+      }
+    });
+    estado.descartadas = quitadas;
+  }
+
+  // --- Paso 3: preguntas --------------------------------------------------------------------
+
+  function htmlPregunta(pregunta) {
+    var r = estado.respuestas[pregunta.clave];
+    var html = '<article class="pregunta" id="pregunta-' + escapar(pregunta.clave) + '">' +
+      '<p class="pregunta__texto">' + escapar(pregunta.texto) + '</p><div class="alternativas">';
+    pregunta.alternativas.forEach(function (alternativa, indice) {
+      var elegida = r && !r.otro && r.indice === indice;
+      html += '<button type="button" class="alternativa" data-clave="' + escapar(pregunta.clave) + '" data-indice="' + indice + '" aria-pressed="' + elegida + '"' + (aprobada() ? ' disabled' : '') + '>' +
+        '<span class="punto punto--' + alternativa.color + '" aria-hidden="true"></span>' +
+        '<span>' + escapar(alternativa.texto) + '<span class="texto-apoyo"> · ' + ETIQUETA_COLOR[alternativa.color] + '</span></span></button>';
+    });
+    html += '<button type="button" class="alternativa alternativa--otro" data-clave="' + escapar(pregunta.clave) + '" data-otro="1" aria-pressed="' + Boolean(r && r.otro) + '"' + (aprobada() ? ' disabled' : '') + '>' +
+      '<span class="punto punto--sin" aria-hidden="true"></span><span>Otro</span></button></div>';
+    if (r && r.otro) {
+      var id = 'otro-' + pregunta.clave;
+      html += '<div class="otro"><div class="campo" style="margin:0"><label for="' + escapar(id) + '">Tu respuesta</label>' +
+        '<input class="entrada" id="' + escapar(id) + '" data-otro-texto="' + escapar(pregunta.clave) + '" maxlength="' + MAXIMO_RESPUESTA_PROPIA + '" value="' + escapar(r.texto) + '"></div>' +
+        '<div class="otro__fila"><span class="punto punto--' + (r.color || 'sin') + '" data-otro-punto="' + escapar(pregunta.clave) + '" aria-hidden="true"></span>' +
+        '<select class="entrada" aria-label="Color del semáforo" data-otro-color="' + escapar(pregunta.clave) + '">' +
+        '<option value="">Elegir color</option>' +
+        ['verde', 'amarillo', 'rojo'].map(function (c) {
+          return '<option value="' + c + '"' + (r.color === c ? ' selected' : '') + '>' + ETIQUETA_COLOR[c] + '</option>';
+        }).join('') + '</select></div>' +
+        '<span class="texto-apoyo">Con texto y color la pregunta queda respondida</span></div>';
+    }
+    return html + '</article>';
+  }
+
+  function htmlPaso3() {
+    var preguntas = guion();
+    var equipo = equipoElegido();
+    var hito = hitoElegido();
+    var html = '<h1 class="paso__titulo">¿Cómo está el equipo?</h1>' +
+      '<p class="paso__ayuda">Equipo ' + equipo.numero + ' · ' + escapar(equipo.nombre) + ' · ' + escapar(hito.nombre) +
+      '. Toca una alternativa por pregunta; si no la conversaron, déjala sin responder</p>';
+    if (estado.descartadas) {
+      html += '<div class="aviso aviso--info">Se quitaron ' + estado.descartadas + ' respuesta(s) que no están en el guion de este equipo e hito.</div>';
+    }
+    if (!preguntas.length) {
+      html += '<div class="aviso aviso--info">La pestaña Preguntas no tiene preguntas activas para ' + escapar(equipo.curso) + ' en ' + escapar(hito.nombre) + '. Puedes guardar la tutoría igual.</div>';
+    }
+    datos.dimensiones.forEach(function (dimension) {
+      var deLaDimension = preguntas.filter(function (p) { return p.dimension === dimension.codigo; });
+      if (!deLaDimension.length) return;
+      html += '<section class="dimension" aria-labelledby="dim-' + dimension.codigo + '">' +
+        '<div class="dimension__cabecera"><h2 class="dimension__titulo" id="dim-' + dimension.codigo + '"><span class="dimension__codigo">' + dimension.codigo + '</span>' + escapar(dimension.nombre) + '</h2>' +
+        '<span class="dimension__cuenta" data-cuenta="' + dimension.codigo + '"></span></div>' +
+        '<div class="preguntas">' + deLaDimension.map(htmlPregunta).join('') + '</div></section>';
+    });
+    return html + htmlError() +
+      '<div class="acciones acciones--fijas"><button type="button" class="boton boton--neutro" data-ir="2">Atrás</button>' +
+      '<span class="acciones__estado" id="cuenta-total" aria-live="polite"></span>' +
+      '<button type="button" class="boton boton--primario" id="guardar">Guardar tutoría</button></div>';
+  }
+
+  function actualizarCuentas() {
+    var preguntas = guion();
+    datos.dimensiones.forEach(function (dimension) {
+      var nodo = document.querySelector('[data-cuenta="' + dimension.codigo + '"]');
+      if (!nodo) return;
+      var deLaDimension = preguntas.filter(function (p) { return p.dimension === dimension.codigo; });
+      nodo.textContent = deLaDimension.filter(function (p) { return respondida(p.clave); }).length + ' de ' + deLaDimension.length;
+    });
+    var total = document.getElementById('cuenta-total');
+    if (total) {
+      total.textContent = preguntas.filter(function (p) { return respondida(p.clave); }).length + ' de ' + preguntas.length + ' respondidas';
+    }
+  }
+
+  function repintarPregunta(clave) {
+    var pregunta = guion().filter(function (p) { return p.clave === clave; })[0];
+    var nodo = document.getElementById('pregunta-' + clave);
+    if (!pregunta || !nodo) return;
+    var temporal = document.createElement('div');
+    temporal.innerHTML = htmlPregunta(pregunta);
+    nodo.replaceWith(temporal.firstChild);
+    actualizarCuentas();
+  }
+
+  function entradaParaGuardar() {
+    var respuestas = {};
+    guion().forEach(function (p) {
+      if (!respondida(p.clave)) return;
+      var r = estado.respuestas[p.clave];
+      respuestas[p.clave] = r.otro ? { otro: true, texto: r.texto, color: r.color } : { indice: r.indice };
+    });
+    return {
+      id: estado.tutoriaId,
+      conduce: estado.conduce,
+      registra: estado.registra,
+      equipoNumero: estado.equipoNumero,
+      hitoNumero: estado.hitoNumero,
+      respuestas: respuestas
+    };
+  }
+
+  function guardar(boton) {
+    boton.disabled = true;
+    boton.textContent = 'Guardando...';
+    estado.error = '';
+    llamar('guardarTutoria', entradaParaGuardar()).then(function (resultado) {
+      estado.tutoriaId = resultado.id;
+      estado.semaforo = resultado.semaforo;
+      // Respuestas nuevas: el borrador de acta anterior, si había, ya no corresponde.
+      estado.acta = null;
+      estado.fase = 'inicio';
+      estado.observaciones = '';
+      irA(4);
+    }).catch(function (error) {
+      estado.error = 'No se pudo guardar: ' + mensajeDe(error);
+      pintar();
+    });
+  }
+
+  // --- Paso 4: semáforo y acta --------------------------------------------------------------
+
+  function htmlSemaforo() {
+    return '<div class="semaforo">' + datos.dimensiones.map(function (dimension) {
+      var color = estado.semaforo && estado.semaforo[dimension.codigo];
+      return '<div class="semaforo__item' + (color ? ' semaforo__item--' + color : '') + '">' +
+        '<span class="punto punto--' + (color || 'sin') + '" aria-hidden="true"></span>' +
+        '<div><div class="semaforo__nombre">' + dimension.codigo + ' · ' + escapar(dimension.nombre) + '</div>' +
+        '<div class="semaforo__estado">' + (color ? ETIQUETA_COLOR[color] : 'Sin dato') + '</div></div></div>';
+    }).join('') + '</div>';
+  }
+
+  function lineasObservaciones(texto) {
+    return String(texto || '').split(/\r?\n/).map(function (linea) {
+      return linea.replace(/^\s*[-*•]\s*/, '').trim();
+    }).filter(function (linea) { return linea; });
+  }
+
+  function htmlVistaPrevia() {
+    if (!estado.acta) return '';
+    return estado.acta.bloques.map(function (bloque) {
+      if (bloque.tipo === 'titulo') return '<div class="vista-previa__titulo">' + escapar(bloque.texto) + '</div>';
+      if (bloque.tipo === 'parrafo') return bloque.texto ? '<p>' + escapar(bloque.texto) + '</p>' : '';
+      if (bloque.tipo === 'encabezado') return '<h3>' + escapar(bloque.texto) + '</h3>';
+      if (bloque.tipo === 'vinetas') {
+        var lineas = lineasObservaciones(estado.observaciones);
+        return '<ul id="vista-observaciones" class="' + (aprobada() ? '' : 'vista-previa__editable') + '">' +
+          (lineas.length ? lineas : ['']).map(function (l) { return '<li>' + escapar(l) + '</li>'; }).join('') + '</ul>';
+      }
+      if (bloque.tipo === 'tabla') {
+        return '<table><tbody>' + bloque.filas.map(function (fila, i) {
+          return '<tr' + (bloque.conEncabezado && i === 0 ? ' class="encabezado"' : '') + '>' +
+            fila.map(function (celda) { return '<td>' + escapar(celda) + '</td>'; }).join('') + '</tr>';
+        }).join('') + '</tbody></table>';
+      }
+      return '';
+    }).join('');
+  }
+
+  function htmlOrigenTexto() {
+    if (!estado.acta) return '';
+    return estado.acta.generadoConIa
+      ? 'Redactado por ' + escapar(estado.acta.modeloIa) + '. Revísalo y corrígelo: nada queda como definitivo sin tu aprobación.'
+      : 'Gemini no respondió (o falta la clave), así que el texto salió de la plantilla sin IA. Revísalo antes de aprobar.';
+  }
+
+  function htmlPaso4() {
+    var equipo = equipoElegido();
+    var html = '<h1 class="paso__titulo">Semáforo y acta</h1>' +
+      '<p class="paso__ayuda">Equipo ' + equipo.numero + ' · ' + escapar(hitoElegido().nombre) + '. La tutoría quedó guardada en la planilla</p>' +
+      '<span class="rotulo">Estado por dimensión</span>' + htmlSemaforo();
+
+    if (estado.fase === 'inicio') {
+      html += '<div class="tarjeta"><span class="rotulo">Acta</span>' +
+        '<p style="margin-top:0">Gemini redacta las observaciones generales a partir de lo registrado. Tú las revisas, las editas si quieres y apruebas el acta.</p>' +
+        htmlError() +
+        '<div class="acciones"><button type="button" class="boton boton--neutro" data-ir="3">Corregir respuestas</button>' +
+        '<button type="button" class="boton boton--primario" id="generar">Generar acta</button></div></div>';
+      return html;
+    }
+    if (estado.fase === 'generando') {
+      return html + '<div class="cargando" role="status"><span class="giro"></span>Redactando el acta... puede tardar hasta un minuto</div>';
+    }
+
+    html += '<div class="revision"><div>';
+    if (aprobada()) {
+      html += '<div class="aviso aviso--exito" role="status">Acta aprobada. El documento quedó en la carpeta de actas de Impulsa.</div>' +
+        htmlError() +
+        '<div class="acciones" style="justify-content:flex-start">' +
+        '<button type="button" class="boton boton--primario" id="descargar">Descargar .docx</button>' +
+        '<a class="boton boton--neutro" href="' + escapar(estado.documento.documentoUrl) + '" target="_blank" rel="noopener">Abrir en Google Docs</a></div>' +
+        '<p class="texto-apoyo">"Abrir en Google Docs" funciona solo con acceso a la carpeta de actas. La descarga funciona siempre.</p>' +
+        '<div class="acciones"><span></span><button type="button" class="boton boton--secundario" id="otra">Registrar otra tutoría</button></div>';
+    } else {
+      var ocupado = estado.fase === 'aprobando';
+      html += '<div class="campo"><label for="observaciones">Observaciones generales de la reunión</label>' +
+        '<textarea class="entrada" id="observaciones" maxlength="5000"' + (ocupado ? ' disabled' : '') + '>' + escapar(estado.observaciones) + '</textarea>' +
+        '<span class="marca-modelo">' + htmlOrigenTexto() + '</span></div>' +
+        htmlError() +
+        (ocupado ? '<div class="cargando" role="status"><span class="giro"></span>Creando el documento...</div>' :
+        '<div class="acciones"><button type="button" class="boton boton--neutro" data-ir="3">Corregir respuestas</button>' +
+        '<span style="display:flex;gap:var(--espacio-3);flex-wrap:wrap">' +
+        '<button type="button" class="boton boton--secundario" id="generar">Volver a generar</button>' +
+        '<button type="button" class="boton boton--primario" id="aprobar">Aprobar acta</button></span></div>');
+    }
+    html += '</div><section class="vista-previa" aria-label="Vista previa del acta" id="vista-previa">' + htmlVistaPrevia() + '</section></div>';
+    return html;
+  }
+
+  function generar() {
+    estado.fase = 'generando';
+    estado.error = '';
+    pintar();
+    llamar('generarActa', estado.tutoriaId).then(function (acta) {
+      estado.acta = acta;
+      estado.observaciones = acta.texto;
+      if (acta.estado === 'aprobada') {
+        estado.fase = 'aprobada';
+        estado.documento = { documentoUrl: acta.documentoUrl, nombreArchivo: acta.nombreArchivo };
+      } else {
+        estado.fase = 'borrador';
+      }
+      pintar();
+    }).catch(function (error) {
+      estado.fase = 'inicio';
+      estado.error = 'No se pudo generar el acta: ' + mensajeDe(error);
+      pintar();
+    });
+  }
+
+  function aprobar() {
+    if (!lineasObservaciones(estado.observaciones).length) {
+      estado.error = 'Escribe al menos una observación antes de aprobar.';
+      pintar();
+      return;
+    }
+    estado.fase = 'aprobando';
+    estado.error = '';
+    pintar();
+    llamar('aprobarActa', estado.tutoriaId, estado.observaciones).then(function (documento) {
+      estado.documento = documento;
+      estado.fase = 'aprobada';
+      pintar();
+    }).catch(function (error) {
+      estado.fase = 'borrador';
+      estado.error = 'No se pudo aprobar: ' + mensajeDe(error);
+      pintar();
+    });
+  }
+
+  function descargar(boton) {
+    boton.disabled = true;
+    boton.textContent = 'Preparando .docx...';
+    llamar('descargarDocx', estado.tutoriaId).then(function (archivo) {
+      var binario = atob(archivo.base64);
+      var bytes = new Uint8Array(binario.length);
+      for (var i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
+      var blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+      var enlace = document.createElement('a');
+      enlace.href = URL.createObjectURL(blob);
+      enlace.download = archivo.nombreArchivo;
+      document.body.appendChild(enlace);
+      enlace.click();
+      setTimeout(function () {
+        URL.revokeObjectURL(enlace.href);
+        enlace.remove();
+      }, 1000);
+      boton.disabled = false;
+      boton.textContent = 'Descargar .docx';
+    }).catch(function (error) {
+      estado.error = 'No se pudo descargar: ' + mensajeDe(error);
+      pintar();
+    });
+  }
+
+  // --- Eventos (delegados en #contenido) ----------------------------------------------------
+
+  var contenido = document.getElementById('contenido');
+
+  contenido.addEventListener('submit', function (evento) {
+    if (evento.target.id !== 'form-paso1') return;
+    evento.preventDefault();
+    estado.error = validarPaso1();
+    if (estado.error) {
+      pintar();
+      return;
+    }
+    recordarTutores();
+    irA(2);
+  });
+
+  contenido.addEventListener('input', function (evento) {
+    var objetivo = evento.target;
+    if (objetivo.dataset.rol) {
+      estado[objetivo.dataset.rol][objetivo.dataset.parte] = objetivo.value;
+    } else if (objetivo.id === 'filtro-equipos') {
+      estado.filtro = objetivo.value;
+      pintarEquipos();
+    } else if (objetivo.dataset.otroTexto) {
+      estado.respuestas[objetivo.dataset.otroTexto].texto = objetivo.value;
+      actualizarCuentas();
+    } else if (objetivo.id === 'observaciones') {
+      estado.observaciones = objetivo.value;
+      var vista = document.getElementById('vista-observaciones');
+      if (vista) {
+        var lineas = lineasObservaciones(objetivo.value);
+        vista.innerHTML = (lineas.length ? lineas : ['']).map(function (l) { return '<li>' + escapar(l) + '</li>'; }).join('');
+      }
+    }
+  });
+
+  contenido.addEventListener('change', function (evento) {
+    var clave = evento.target.dataset.otroColor;
+    if (!clave) return;
+    estado.respuestas[clave].color = evento.target.value;
+    var punto = document.querySelector('[data-otro-punto="' + CSS.escape(clave) + '"]');
+    if (punto) punto.className = 'punto punto--' + (evento.target.value || 'sin');
+    actualizarCuentas();
+  });
+
+  contenido.addEventListener('click', function (evento) {
+    var boton = evento.target.closest('button, [data-ir]');
+    if (!boton || boton.disabled) return;
+    if (boton.dataset.ir) {
+      irA(Number(boton.dataset.ir));
+    } else if (boton.dataset.equipo) {
+      elegirEquipo(Number(boton.dataset.equipo));
+    } else if (boton.dataset.hito) {
+      estado.hitoNumero = Number(boton.dataset.hito);
+      pintar();
+    } else if (boton.id === 'siguiente-2') {
+      ajustarRespuestasAlGuion();
+      irA(3);
+    } else if (boton.dataset.clave) {
+      var clave = boton.dataset.clave;
+      var actual = estado.respuestas[clave];
+      if (boton.dataset.otro) {
+        if (!actual || !actual.otro) estado.respuestas[clave] = { otro: true, texto: '', color: '' };
+        repintarPregunta(clave);
+        var campo = document.getElementById('otro-' + clave);
+        if (campo) campo.focus();
+      } else {
+        var indice = Number(boton.dataset.indice);
+        // Tocar de nuevo la alternativa elegida la retira (pregunta no conversada).
+        if (actual && !actual.otro && actual.indice === indice) delete estado.respuestas[clave];
+        else estado.respuestas[clave] = { indice: indice };
+        repintarPregunta(clave);
+      }
+    } else if (boton.id === 'guardar') {
+      guardar(boton);
+    } else if (boton.id === 'generar') {
+      generar();
+    } else if (boton.id === 'aprobar') {
+      aprobar();
+    } else if (boton.id === 'descargar') {
+      descargar(boton);
+    } else if (boton.id === 'otra') {
+      estado = estadoInicial(leerTutoresRecordados());
+      irA(1);
+    }
+  });
+
+  // --- Arranque -----------------------------------------------------------------------------
+
+  llamar('obtenerDatosIniciales').then(function (respuesta) {
+    datos = respuesta;
+    if (datos.semestre) {
+      var chip = document.getElementById('semestre');
+      chip.textContent = 'Semestre ' + datos.semestre;
+      chip.hidden = false;
+    }
+    pintar();
+  }).catch(function (error) {
+    contenido.innerHTML = '<div class="aviso aviso--error" role="alert">No se pudieron leer los datos de la planilla: ' +
+      escapar(mensajeDe(error)) + '</div>';
+  });
+</script>

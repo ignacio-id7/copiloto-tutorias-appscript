@@ -1,0 +1,24 @@
+# Sistema y editores
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Node (solo para las pruebas)
+node_modules/
+
+# Secretos: la clave de Gemini va en las propiedades del script, nunca aqui
+.env
+.env.*
+*.key
+
+# Configuracion de clasp, por si alguien la usa (este proyecto se instala a mano)
+.clasp.json
+.clasprc.json
+
+# Actas descargadas durante pruebas manuales
+*.docx
+
+# Configuracion local de Claude Code
+.claude/settings.local.json
