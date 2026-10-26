@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <!-- Diálogo "Copiloto > Eliminar tutorías…" de la planilla. No se incluye en la aplicación web. -->
+    <style>
+      :root {
+        --color-fondo: #0c111e;
+        --color-superficie: #121a2c;
+        --color-acento: #00a499;
+        --color-acento-texto: #3fd5c8;
+        --color-sobre-acento: #021613;
+        --color-texto: #ffffff;
+        --color-texto-suave: #a0aab5;
+        --color-borde: rgba(160, 170, 181, 0.35);
+        --color-foco: #3fe0d3;
+        --color-rojo: #f87171;
+        --color-sobre-rojo: #05050a;
+        --color-error: rgba(248, 113, 113, 0.14);
+        --color-borde-error: rgba(248, 113, 113, 0.55);
+        --color-aviso: rgba(251, 191, 36, 0.12);
+        --color-borde-aviso: rgba(251, 191, 36, 0.45);
+        --color-exito: rgba(74, 222, 128, 0.1);
+        --color-borde-exito: rgba(74, 222, 128, 0.45);
+        color-scheme: dark;
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      body {
+        margin: 0; padding: 16px; background: var(--color-fondo); color: var(--color-texto);
+        font-family: 'Avenir Next', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; font-size: 14px; line-height: 1.5;
+      }
+      button, input { font: inherit; color: inherit; }
+      :focus-visible { outline: 3px solid var(--color-foco); outline-offset: 2px; }
+      [hidden] { display: none !important; }
+      p { margin: 0 0 12px; }
+      .ayuda { color: var(--color-texto-suave); }
+      .filtros { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-bottom: 12px; }
+      .filtros label { display: grid; gap: 4px; font-size: 13px; color: var(--color-texto-suave); }
+      .filtros input {
+        min-height: 36px; padding: 4px 8px; background: var(--color-superficie);
+        border: 1px solid var(--color-borde); border-radius: 8px;
+      }
+      .cuenta { margin-left: auto; color: var(--color-texto-suave); }
+      .tabla-marco { max-height: 380px; overflow: auto; border: 1px solid var(--color-borde); border-radius: 10px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--color-borde); white-space: nowrap; }
+      th { position: sticky; top: 0; background: var(--color-superficie); font-weight: 600; z-index: 1; }
+      td.proyecto { white-space: normal; min-width: 10rem; }
+      tr.elegida td { background: rgba(0, 164, 153, 0.12); }
+      input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--color-acento); }
+      .acta-aprobada { color: var(--color-acento-texto); font-weight: 600; }
+      .acciones { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+      .boton {
+        min-height: 40px; padding: 6px 16px; border-radius: 999px; cursor: pointer;
+        border: 1px solid var(--color-borde); background: transparent;
+      }
+      .boton:disabled { opacity: 0.5; cursor: not-allowed; }
+      .boton--peligro { background: var(--color-rojo); border-color: var(--color-rojo); color: var(--color-sobre-rojo); font-weight: 600; }
+      .aviso { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--color-borde); margin-top: 12px; }
+      .aviso--error { background: var(--color-error); border-color: var(--color-borde-error); }
+      .aviso--confirmar { background: var(--color-aviso); border-color: var(--color-borde-aviso); }
+      .aviso--exito { background: var(--color-exito); border-color: var(--color-borde-exito); }
+      .aviso ul { margin: 8px 0 0; padding-left: 20px; }
+      .aviso a { color: var(--color-acento-texto); }
+    </style>
+  </head>
+  <body>
+    <p>Elimina las tutorías elegidas con sus respuestas, preguntas del tutor, consultas, compromisos y
+      acta. <strong>No se puede deshacer.</strong> Los documentos de las actas aprobadas no se borran del
+      Drive: al final verás la lista para borrarlos a mano desde la carpeta de actas.</p>
+
+    <div class="filtros">
+      <label>Registradas desde <input type="date" id="desde"></label>
+      <label>hasta <input type="date" id="hasta"></label>
+      <button type="button" class="boton" id="limpiar">Quitar filtro</button>
+      <span class="cuenta" id="cuenta" aria-live="polite"></span>
+    </div>
+
+    <div id="lista"><p class="ayuda">Leyendo la planilla...</p></div>
+
+    <div id="confirmar" class="aviso aviso--confirmar" role="alertdialog" aria-labelledby="confirmar-texto" hidden>
+      <p id="confirmar-texto"></p>
+      <div class="acciones">
+        <button type="button" class="boton" id="cancelar">Cancelar</button>
+        <button type="button" class="boton boton--peligro" id="si-eliminar">Sí, eliminar</button>
+      </div>
+    </div>
+
+    <div id="mensaje" aria-live="polite"></div>
+
+    <div class="acciones">
+      <button type="button" class="boton" id="cerrar">Cerrar</button>
+      <button type="button" class="boton boton--peligro" id="eliminar" disabled>Eliminar seleccionadas</button>
+    </div>
+
+    <script>
+      var PERMISO = <?!= JSON.stringify(permiso) ?>;
+      var tutorias = [];
+      var elegidas = {};
+      var ocupado = false;
+
+      function $(id) {
+        return document.getElementById(id);
+      }
+
+      function escapar(texto) {
+        return String(texto == null ? '' : texto)
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      }
+
+      function llamar(nombre) {
+        var argumentos = Array.prototype.slice.call(arguments, 1);
+        return new Promise(function (resolver, rechazar) {
+          var corredor = google.script.run.withSuccessHandler(resolver).withFailureHandler(rechazar);
+          corredor[nombre].apply(corredor, argumentos);
+        });
+      }
+
+      function mensajeDeError(error) {
+        return (error && error.message) || String(error);
+      }
+
+      function plural(n, singular, varios) {
+        return n + ' ' + (n === 1 ? singular : varios);
+      }
+
+      /** Tutorías dentro del filtro por fecha de registro (registrada_en, AAAA-MM-DD ...). */
+      function visibles() {
+        var desde = $('desde').value;
+        var hasta = $('hasta').value;
+        return tutorias.filter(function (t) {
+          var dia = String(t.registradaEn).slice(0, 10);
+          return (!desde || dia >= desde) && (!hasta || dia <= hasta);
+        });
+      }
+
+      function seleccion() {
+        return visibles().filter(function (t) {
+          return elegidas[t.id];
+        });
+      }
+
+      function pintar() {
+        var lista = visibles();
+        // Una tutoría que el filtro esconde deja de estar elegida.
+        var nuevas = {};
+        lista.forEach(function (t) {
+          if (elegidas[t.id]) nuevas[t.id] = true;
+        });
+        elegidas = nuevas;
+        var elegidasN = seleccion().length;
+        $('cuenta').textContent = plural(lista.length, 'tutoría', 'tutorías') + ' · ' +
+          plural(elegidasN, 'elegida', 'elegidas');
+        $('eliminar').disabled = ocupado || !elegidasN;
+
+        if (!tutorias.length) {
+          $('lista').innerHTML = '<p class="ayuda">No hay tutorías registradas.</p>';
+          return;
+        }
+        if (!lista.length) {
+          $('lista').innerHTML = '<p class="ayuda">Ninguna tutoría se registró entre esas fechas.</p>';
+          return;
+        }
+        var todas = elegidasN === lista.length;
+        var filas = lista.map(function (t) {
+          var marcada = Boolean(elegidas[t.id]);
+          var acta = t.acta === 'aprobada' ? '<span class="acta-aprobada">Aprobada</span>' :
+            t.acta === 'borrador' ? 'Borrador' : 'Sin acta';
+          return '<tr' + (marcada ? ' class="elegida"' : '') + '>' +
+            '<td><input type="checkbox" data-id="' + escapar(t.id) + '"' + (marcada ? ' checked' : '') +
+            ' aria-label="Elegir la tutoría del equipo ' + escapar(t.equipoNumero) + ' del ' + escapar(t.fecha) + '"></td>' +
+            '<td>' + escapar(t.fecha) + '</td>' +
+            '<td>' + escapar(t.semestre) + '</td>' +
+            '<td>' + escapar(t.curso) + '</td>' +
+            '<td>' + escapar(t.equipoNumero) + '</td>' +
+            '<td class="proyecto">' + escapar(t.equipoProyecto) + '</td>' +
+            '<td>' + escapar(t.hitoNombre) + '</td>' +
+            '<td>' + escapar(t.dupla) + '</td>' +
+            '<td>' + escapar(t.registradaEn) + '</td>' +
+            '<td>' + acta + '</td></tr>';
+        }).join('');
+        $('lista').innerHTML = '<div class="tabla-marco"><table><thead><tr>' +
+          '<th><input type="checkbox" id="todas"' + (todas ? ' checked' : '') + ' aria-label="Elegir todas las que se ven"></th>' +
+          '<th>Fecha</th><th>Semestre</th><th>Curso</th><th>Equipo</th><th>Proyecto</th><th>Hito</th>' +
+          '<th>Dupla</th><th>Registrada en</th><th>Acta</th></tr></thead><tbody>' + filas + '</tbody></table></div>';
+      }
+
+      function mostrarMensaje(clase, html) {
+        $('mensaje').innerHTML = html ? '<div class="aviso ' + clase + '" role="status">' + html + '</div>' : '';
+      }
+
+      function cargar() {
+        return llamar('obtenerTutoriasParaEliminar', PERMISO).then(function (lista) {
+          tutorias = lista;
+          elegidas = {};
+          pintar();
+        }).catch(function (error) {
+          $('lista').innerHTML = '';
+          mostrarMensaje('aviso--error', 'No se pudo leer la planilla: ' + escapar(mensajeDeError(error)));
+        });
+      }
+
+      function pedirConfirmacion() {
+        var lista = seleccion();
+        if (!lista.length) return;
+        var aprobadas = lista.filter(function (t) {
+          return t.acta === 'aprobada';
+        }).length;
+        $('confirmar-texto').textContent = 'Vas a eliminar ' + plural(lista.length, 'tutoría', 'tutorías') +
+          (aprobadas ? ', ' + aprobadas + ' con acta aprobada' : ', ninguna con acta aprobada') +
+          '. No se puede deshacer. ¿Eliminar?';
+        $('confirmar').hidden = false;
+        mostrarMensaje('', '');
+        $('cancelar').focus();
+      }
+
+      function eliminar() {
+        var ids = seleccion().map(function (t) {
+          return t.id;
+        });
+        $('confirmar').hidden = true;
+        ocupado = true;
+        pintar();
+        mostrarMensaje('', 'Eliminando...');
+        llamar('eliminarTutorias', PERMISO, ids).then(function (resultado) {
+          var html = 'Se eliminaron ' + plural(resultado.eliminadas, 'tutoría', 'tutorías') + '.';
+          if (resultado.noEncontradas) {
+            html += ' ' + plural(resultado.noEncontradas, 'ya no estaba', 'ya no estaban') + ' en la planilla.';
+          }
+          if (resultado.aviso) html += '<br>' + escapar(resultado.aviso);
+          if (resultado.documentos.length) {
+            html += '<p style="margin:8px 0 0">Estos documentos de actas aprobadas quedaron en la carpeta de actas. ' +
+              'Bórralos a mano desde el Drive:</p><ul>' + resultado.documentos.map(function (d) {
+                var nombre = escapar(d.nombreArchivo || d.url || 'Documento sin nombre');
+                return '<li>' + (/^https:\/\//.test(d.url)
+                  ? '<a href="' + escapar(d.url) + '" target="_blank" rel="noopener">' + nombre + '</a>'
+                  : nombre + ' (sin enlace)') + '</li>';
+              }).join('') + '</ul>';
+          }
+          ocupado = false;
+          return cargar().then(function () {
+            mostrarMensaje('aviso--exito', html);
+          });
+        }).catch(function (error) {
+          ocupado = false;
+          pintar();
+          mostrarMensaje('aviso--error', 'No se eliminó nada: ' + escapar(mensajeDeError(error)));
+        });
+      }
+
+      $('lista').addEventListener('change', function (evento) {
+        var casilla = evento.target;
+        if (casilla.id === 'todas') {
+          visibles().forEach(function (t) {
+            if (casilla.checked) elegidas[t.id] = true;
+            else delete elegidas[t.id];
+          });
+        } else if (casilla.dataset.id) {
+          if (casilla.checked) elegidas[casilla.dataset.id] = true;
+          else delete elegidas[casilla.dataset.id];
+        }
+        $('confirmar').hidden = true;
+        pintar();
+      });
+      ['desde', 'hasta'].forEach(function (id) {
+        $(id).addEventListener('change', function () {
+          $('confirmar').hidden = true;
+          pintar();
+        });
+      });
+      $('limpiar').addEventListener('click', function () {
+        $('desde').value = '';
+        $('hasta').value = '';
+        $('confirmar').hidden = true;
+        pintar();
+      });
+      $('eliminar').addEventListener('click', pedirConfirmacion);
+      $('cancelar').addEventListener('click', function () {
+        $('confirmar').hidden = true;
+        $('eliminar').focus();
+      });
+      $('si-eliminar').addEventListener('click', eliminar);
+      $('cerrar').addEventListener('click', function () {
+        google.script.host.close();
+      });
+
+      cargar();
+    </script>
+  </body>
+</html>

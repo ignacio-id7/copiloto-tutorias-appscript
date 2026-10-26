@@ -1135,6 +1135,102 @@ function codigoCompartidoPanel() {
   return resumirPanel.toString();
 }
 
+// --- Eliminar tutorías (diálogo de la planilla) --------------------------------------------
+
+/** Estado del acta de cada tutoría: 'aprobada' si alguna de sus filas de Actas lo está. */
+function estadosDeActa(actas) {
+  var estados = {};
+  (actas || []).forEach(function (a) {
+    if (!a.tutoria_id || estados[a.tutoria_id] === 'aprobada') return;
+    estados[a.tutoria_id] = a.estado === 'aprobada' ? 'aprobada' : 'borrador';
+  });
+  return estados;
+}
+
+/**
+ * Tutorías para el diálogo "Eliminar tutorías", más recientes primero. Copia campo por campo:
+ * nunca `integrantes_presentes`.
+ */
+function listarTutoriasParaEliminar(tutorias, actas) {
+  var estados = estadosDeActa(actas);
+  return (tutorias || []).filter(function (t) {
+    return t.id;
+  }).slice().sort(compararTutorias).reverse().map(function (t) {
+    return {
+      id: t.id,
+      fecha: t.fecha || '',
+      semestre: t.semestre || '',
+      curso: t.curso || '',
+      equipoNumero: numeroOVacio(t.equipo_numero),
+      equipoProyecto: t.equipo_proyecto || '',
+      hitoNombre: t.hito_nombre || '',
+      dupla: t.dupla || '',
+      registradaEn: t.registrada_en || '',
+      acta: estados[t.id] || 'sin acta'
+    };
+  });
+}
+
+/**
+ * Qué borrar para eliminar unas tutorías. datos: filas de leerHoja (con `_fila`) de Tutorias,
+ * Actas y cada pestaña de PESTANAS_DE_LA_TUTORIA. Devuelve los números de fila de cada pestaña
+ * (de mayor a menor), los ids eliminados y los que no están en Tutorias (que no borran nada), y
+ * los documentos de las actas aprobadas: el código no borra nada en el Drive, quedan en la
+ * carpeta de actas para borrarlos a mano.
+ */
+function planEliminarTutorias(datos, ids) {
+  datos = datos || {};
+  var pedidos = {};
+  var orden = [];
+  (ids || []).forEach(function (id) {
+    var limpio = String(id == null ? '' : id).trim();
+    if (limpio && !pedidos[limpio]) {
+      pedidos[limpio] = true;
+      orden.push(limpio);
+    }
+  });
+  var existentes = {};
+  (datos.Tutorias || []).forEach(function (t) {
+    if (pedidos[t.id]) existentes[t.id] = true;
+  });
+  var deMayorAMenor = function (filas) {
+    return filas.map(function (r) {
+      return r._fila;
+    }).sort(function (a, b) {
+      return b - a;
+    });
+  };
+  var filas = {
+    Tutorias: deMayorAMenor((datos.Tutorias || []).filter(function (t) {
+      return existentes[t.id];
+    }))
+  };
+  PESTANAS_DE_LA_TUTORIA.concat(['Actas']).forEach(function (nombre) {
+    filas[nombre] = deMayorAMenor((datos[nombre] || []).filter(function (r) {
+      return existentes[r.tutoria_id];
+    }));
+  });
+  var documentos = [];
+  (datos.Actas || []).forEach(function (a) {
+    if (!existentes[a.tutoria_id] || a.estado !== 'aprobada') return;
+    documentos.push({
+      tutoriaId: a.tutoria_id,
+      nombreArchivo: a.nombre_archivo || '',
+      url: a.documento_url || (a.documento_id ? 'https://docs.google.com/document/d/' + a.documento_id + '/edit' : '')
+    });
+  });
+  return {
+    eliminadas: orden.filter(function (id) {
+      return existentes[id];
+    }),
+    noEncontradas: orden.filter(function (id) {
+      return !existentes[id];
+    }),
+    filas: filas,
+    documentos: documentos
+  };
+}
+
 // --- Minuta (estructura de backend/app/logica/documento_acta.py) ---------------------------
 
 var TITULO_MINUTA = 'Minuta de Seguimiento';
@@ -1386,6 +1482,7 @@ function onOpen() {
     .createMenu('Copiloto')
     .addItem('Configurar planilla', 'configurarPlanilla')
     .addItem('Recalcular tablas de análisis', 'recalcularTablasAnalisis')
+    .addItem('Eliminar tutorías…', 'abrirEliminarTutorias')
     .addToUi();
 }
 
@@ -1612,12 +1709,17 @@ function reemplazarFilas(nombre, objetos) {
 
 /** Borra las filas de la tutoría, en bloques de filas seguidas, de abajo hacia arriba. */
 function borrarFilasDeTutoria(nombre, tutoriaId) {
-  var pestana = hoja(nombre);
-  var filas = leerHoja(nombre).filter(function (r) {
+  borrarNumerosDeFila(nombre, leerHoja(nombre).filter(function (r) {
     return r.tutoria_id === tutoriaId;
   }).map(function (r) {
     return r._fila;
-  }).sort(function (a, b) {
+  }));
+}
+
+/** Borra esas filas de la pestaña, en bloques de filas seguidas, de abajo hacia arriba. */
+function borrarNumerosDeFila(nombre, numeros) {
+  var pestana = hoja(nombre);
+  var filas = numeros.slice().sort(function (a, b) {
     return b - a;
   });
   var i = 0;
@@ -2137,6 +2239,76 @@ function escribirMinuta(cuerpo, bloques) {
   }
 }
 
+// ===========================================================================================
+// 4. Apps Script: eliminar tutorías (solo desde la planilla)
+// ===========================================================================================
+
+// Toda función global se puede llamar con google.script.run, también desde la aplicación web.
+// Por eso el diálogo recibe un permiso al azar, que dura una hora, al abrirse desde el menú de la
+// planilla, y
+// obtenerTutoriasParaEliminar y eliminarTutorias no hacen nada sin él.
+var DURACION_PERMISO_ELIMINAR_S = 3600;
+var MAXIMO_TUTORIAS_A_ELIMINAR = 500;
+
+/** Ítem de menú "Copiloto > Eliminar tutorías…". */
+function abrirEliminarTutorias() {
+  var permiso = Utilities.getUuid();
+  CacheService.getScriptCache().put('eliminar:' + permiso, 'SI', DURACION_PERMISO_ELIMINAR_S);
+  var plantilla = HtmlService.createTemplateFromFile('Eliminar');
+  plantilla.permiso = permiso;
+  SpreadsheetApp.getUi().showModalDialog(plantilla.evaluate().setWidth(1000).setHeight(640), 'Eliminar tutorías');
+}
+
+function exigirPermisoEliminar(permiso) {
+  var vigente = typeof permiso === 'string' && permiso &&
+    CacheService.getScriptCache().get('eliminar:' + permiso) === 'SI';
+  if (!vigente) {
+    throw new Error('El diálogo venció o no se abrió desde la planilla. Ciérralo y vuelve a abrir ' +
+      'Copiloto > Eliminar tutorías….');
+  }
+}
+
+function obtenerTutoriasParaEliminar(permiso) {
+  exigirPermisoEliminar(permiso);
+  return listarTutoriasParaEliminar(leerHoja('Tutorias'), leerHoja('Actas'));
+}
+
+/**
+ * Borra cada tutoría de Tutorias con sus filas de PESTANAS_DE_LA_TUTORIA y de Actas, y rehace
+ * las tablas de análisis una vez. No borra nada en el Drive: devuelve los documentos de las actas
+ * aprobadas, que quedan en la carpeta de actas para borrarlos a mano.
+ */
+function eliminarTutorias(permiso, ids) {
+  exigirPermisoEliminar(permiso);
+  if (!Array.isArray(ids) || !ids.length) throw new Error('No elegiste ninguna tutoría.');
+  if (ids.length > MAXIMO_TUTORIAS_A_ELIMINAR) {
+    throw new Error('Elige como máximo ' + MAXIMO_TUTORIAS_A_ELIMINAR + ' tutorías a la vez.');
+  }
+  return conBloqueo(function () {
+    var pestanas = ['Tutorias'].concat(PESTANAS_DE_LA_TUTORIA, ['Actas']);
+    var datos = {};
+    pestanas.forEach(function (nombre) {
+      datos[nombre] = leerHoja(nombre);
+    });
+    var plan = planEliminarTutorias(datos, ids);
+    pestanas.forEach(function (nombre) {
+      borrarNumerosDeFila(nombre, plan.filas[nombre]);
+    });
+    var aviso = '';
+    if (plan.eliminadas.length) {
+      try {
+        recalcularSinBloqueo();
+      } catch (error) {
+        console.log('No se pudieron recalcular las tablas de análisis: ' + error);
+        aviso = 'Las tutorías se eliminaron, pero no se pudieron recalcular las tablas de análisis. ' +
+          'Usa Copiloto > Recalcular tablas de análisis.';
+      }
+    }
+    return { eliminadas: plan.eliminadas.length, noEncontradas: plan.noEncontradas.length,
+      documentos: plan.documentos, aviso: aviso };
+  });
+}
+
 if (typeof module !== 'undefined') {
   module.exports = {
     DIMENSIONES: DIMENSIONES,
@@ -2167,6 +2339,8 @@ if (typeof module !== 'undefined') {
     armarPanel: armarPanel,
     resumirPanel: resumirPanel,
     codigoCompartidoPanel: codigoCompartidoPanel,
+    listarTutoriasParaEliminar: listarTutoriasParaEliminar,
+    planEliminarTutorias: planEliminarTutorias,
     lineasObservaciones: lineasObservaciones,
     armarMinuta: armarMinuta,
     nombreArchivoActa: nombreArchivoActa
