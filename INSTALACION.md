@@ -11,6 +11,8 @@ sección 7, que dice qué volver a pegar y qué cargar.
 **Si ya tienes la segunda versión** (tutores, duplas e integrantes), ve directo a la sección 9:
 agrega el Panel de seguimiento.
 
+**Si ya tienes el Panel**, ve a la sección 10: agrega **Copiloto > Eliminar tutorías…**.
+
 Necesitas:
 
 - La cuenta de Google de Impulsa (no una cuenta personal: la app y las actas quedan en el
@@ -18,7 +20,7 @@ Necesitas:
 - Una clave de la API de Gemini creada con esa misma cuenta, en
   [Google AI Studio](https://aistudio.google.com/apikey) (gratuita).
 - clasp en tu computador, el mismo que usas para el portal (sección 0). Solo si instalas a
-  mano: los cinco archivos de código de la carpeta `src/` de este repositorio, abiertos en un
+  mano: los seis archivos de código de la carpeta `src/` de este repositorio, abiertos en un
   editor de texto (el Bloc de notas sirve) para copiar su contenido.
 - Los tres archivos de datos reales del semestre, en
   `C:\Users\ignac\Proyectos\copiloto-tutorias-appscript\datos\`: `tutores.csv`,
@@ -33,7 +35,7 @@ pudieron verificar en la documentación oficial están marcadas como tales.
 
 ## 0. Sesión de clasp: qué haces tú y qué hace Claude Code
 
-El código vive en `src/` y lo sube clasp: los cinco archivos de código y el manifiesto
+El código vive en `src/` y lo sube clasp: los seis archivos de código y el manifiesto
 `appsscript.json`, copiado tal cual del editor. `.clasp.json` (fuera de git) apunta al proyecto
 de Apps Script del Copiloto.
 
@@ -84,16 +86,16 @@ interruptor en esa página). Si ya usas clasp con el portal, ya está activada.
    y confirma con **Rename** (etiqueta de la documentación en inglés; no se pudo verificar la
    del editor en español).
 
-## 2. Crear los cinco archivos
+## 2. Crear los seis archivos
 
 **Con clasp** no hace falta crearlos a mano. Copia el ID del script desde **Project Settings**
 (en español, **Configuración del proyecto**; la documentación no da el rótulo exacto del campo)
 en `scriptId` de `.clasp.json`, abre la sesión (sección 0) y pídele a Claude Code que ejecute
-`clasp push`: reemplaza el archivo de ejemplo por los cinco de `src/` y el manifiesto. Sigue en
+`clasp push`: reemplaza el archivo de ejemplo por los seis de `src/` y el manifiesto. Sigue en
 la sección 3.
 
 **A mano** (camino alternativo): el proyecto trae un archivo de código de ejemplo (`Code.gs` o `Código.gs`). Debe quedar con
-estos cinco archivos, con estos nombres y tipos exactos:
+estos seis archivos, con estos nombres y tipos exactos:
 
 | Archivo en el editor | Tipo | Contenido que se pega |
 | --- | --- | --- |
@@ -102,6 +104,7 @@ estos cinco archivos, con estos nombres y tipos exactos:
 | `Index.html` | HTML | `src/Index.html` |
 | `Estilos.html` | HTML | `src/Estilos.html` |
 | `Cliente.html` | HTML | `src/Cliente.html` |
+| `Eliminar.html` | HTML | `src/Eliminar.html` |
 
 1. **Codigo.gs.** Abre el archivo de ejemplo que trae el proyecto. En el menú de tres puntos
    que aparece junto a su nombre, elige la opción para cambiarle el nombre y escribe
@@ -120,7 +123,8 @@ estos cinco archivos, con estos nombres y tipos exactos:
 4. **Estilos.html.** Igual que el anterior, con el nombre `Estilos` y el contenido de
    `src/Estilos.html`.
 5. **Cliente.html.** Igual, con el nombre `Cliente` y el contenido de `src/Cliente.html`.
-6. Revisa la lista de archivos a la izquierda: deben aparecer los cinco, sin espacios ni
+6. **Eliminar.html.** Igual, con el nombre `Eliminar` y el contenido de `src/Eliminar.html`.
+7. Revisa la lista de archivos a la izquierda: deben aparecer los seis, sin espacios ni
    tildes en los nombres y respetando mayúsculas (`Index`, no `index`).
 
 ## 3. Configurar la planilla y autorizar los permisos
@@ -153,8 +157,9 @@ estos cinco archivos, con estos nombres y tipos exactos:
 
 `configurarPlanilla` se puede correr de nuevo cuando quieras: agrega las pestañas y columnas que
 falten, sin borrar ni pisar lo que ya esté en la planilla. Al reabrir la planilla aparece además
-un menú **Copiloto** con dos opciones: **Configurar planilla**, que hace lo mismo, y
-**Recalcular tablas de análisis**, que rehace `SemaforoDimensiones` y `EstadoEquipos`.
+un menú **Copiloto** con tres opciones: **Configurar planilla**, que hace lo mismo,
+**Recalcular tablas de análisis**, que rehace `SemaforoDimensiones` y `EstadoEquipos`, y
+**Eliminar tutorías…** (sección 10).
 
 Las pestañas que escribe la app (y las dos de Data Studio) quedan **protegidas con
 advertencia**: se pueden editar a mano, pero Sheets avisa antes. Es el camino manual si la app
@@ -410,9 +415,8 @@ Sigue la sección 9.2. La tutoría de la comprobación 8.2 debe aparecer en la t
 realizadas" y en la tabla de estado de los equipos. El informe de Data Studio
 (`DATA_STUDIO.md`) es opcional.
 
-Cuando termines las comprobaciones, borra a mano las filas de prueba de `Tutorias`,
-`Respuestas`, `PreguntasTutor`, `ConsultasEquipo`, `Compromisos` y `Actas` (Sheets avisa
-porque están protegidas) y usa **Copiloto > Recalcular tablas de análisis**.
+Cuando termines las comprobaciones, elimina las tutorías de prueba con **Copiloto > Eliminar
+tutorías…** (sección 10) y borra a mano sus actas aprobadas de la carpeta de actas.
 
 ---
 
@@ -456,6 +460,42 @@ cualquiera que abra la URL de la app, y no muestra nombres de estudiantes.
 Si el Panel dice que no se pudo cargar, revisa que las pestañas `Equipos`, `Tutorias`,
 `Respuestas`, `Actas`, `Compromisos` y `ConsultasEquipo` existan (sección 3) y que hayas
 actualizado el despliegue (sección 6.1, paso 3, o sección 6.2, pasos 3 a 6).
+
+---
+
+## 10. Eliminar tutorías
+
+Para borrar tutorías registradas (por ejemplo, las de prueba) con todo lo que depende de ellas:
+sus filas de `Tutorias`, `Respuestas`, `PreguntasTutor`, `ConsultasEquipo`, `Compromisos` y
+`Actas`. Se hace solo desde la planilla, en el computador; la aplicación web no puede eliminar.
+**No se puede deshacer.**
+
+### 10.1 Subir el cambio
+
+1. En esta versión cambió `Codigo.gs` y hay un archivo nuevo, `Eliminar.html`. Súbelos con clasp
+   (sección 6.1, paso 1) o, a mano, pega `Codigo.gs` y crea `Eliminar.html` (sección 2, paso 6).
+2. No hay pestañas ni columnas nuevas. Correr `configurarPlanilla` no hace falta.
+3. Actualiza el despliegue sin cambiar la URL: sección 6.1, paso 3, o sección 6.2, pasos 3 a 6.
+
+### 10.2 Eliminar
+
+1. Recarga la planilla: el menú **Copiloto** tiene la opción **Eliminar tutorías…**. Haz clic
+   en ella. La primera vez puede pedir autorización: repite los pasos 3.3 a 3.5.
+2. Se abre un diálogo con las tutorías, las más recientes primero: fecha, semestre, curso,
+   equipo, proyecto, hito, dupla, fecha de registro y estado del acta. No muestra integrantes.
+3. Si quieres, filtra con **Registradas desde** y **hasta**. Marca las casillas de las tutorías
+   que quieres eliminar (la casilla del encabezado marca todas las que se ven).
+4. Haz clic en **Eliminar seleccionadas**. El diálogo dice cuántas tutorías y cuántas actas
+   aprobadas vas a eliminar. Confirma con **Sí, eliminar** o vuelve con **Cancelar**.
+5. Al terminar, el diálogo dice cuántas se eliminaron. Las tablas de análisis se rehacen solas.
+6. **Las actas aprobadas se borran a mano.** El código no borra nada en el Drive: si alguna
+   tutoría tenía el acta aprobada, el diálogo muestra la lista de sus documentos con su enlace.
+   Ábrelos y bórralos a mano desde la carpeta `Copiloto de Tutorías - Actas`.
+7. Abre el Panel de la aplicación web y haz clic en **Actualizar**: las tutorías eliminadas ya
+   no aparecen.
+
+Si el diálogo dice que venció (pasó una hora desde que lo abriste), ciérralo y vuelve a abrir
+**Copiloto > Eliminar tutorías…**.
 
 ---
 

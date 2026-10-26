@@ -38,6 +38,11 @@ Estas reglas no se relajan sin decisión explícita del usuario:
 10. **Los datos reales nunca entran a git.** `datos/` (CSV de tutores, duplas y equipos con
     nombres de estudiantes) está en `.gitignore`. Nunca se copian datos reales a `src/`,
     `pruebas/` ni a ningún archivo versionado; las pruebas usan datos ficticios.
+11. **El código no borra nada en el Drive** (igual que R-14 del portal): no envía a la papelera,
+    no elimina y no quita permisos. Lo que haya que borrar en el Drive se borra a mano.
+    `pruebas/sin_borrados_drive.test.js` revisa `src/` y falla si aparece `setTrashed`,
+    `removeFile`, `removeFolder`, `Drive.Files` o `Drive.Permissions` con `remove` o `delete`,
+    `removeEditor`, `removeViewer` o `revokePermissions`.
 
 ## Forma de trabajo
 
@@ -47,9 +52,10 @@ cuenta de Impulsa en su PowerShell, y Claude Code sube `src/` con los comandos d
 `clasp push` reemplaza todo el proyecto en línea, así que nada se edita directamente en el
 editor. Por eso:
 
-- En `src/`, con el mismo nombre que tienen en el editor, cinco archivos de código: `Codigo.gs`
-  (servidor), `Datos.gs` (banco de preguntas e hitos de ejemplo), `Index.html`, `Estilos.html`
-  y `Cliente.html` (JavaScript del navegador, incluido desde `Index.html`), más el manifiesto.
+- En `src/`, con el mismo nombre que tienen en el editor, seis archivos de código: `Codigo.gs`
+  (servidor), `Datos.gs` (banco de preguntas e hitos de ejemplo), `Index.html`, `Estilos.html`,
+  `Cliente.html` (JavaScript del navegador, incluido desde `Index.html`) y `Eliminar.html` (el
+  diálogo de la planilla para eliminar tutorías), más el manifiesto.
   `.clasp.json` (en `.gitignore`) sube solo `.gs`, `.html` y `.json` desde `src/`.
 - El manifiesto `src/appsscript.json` se copió tal cual del editor, sin inventarlo: zona horaria
   `America/Santiago`, V8 y la aplicación web ejecutada como quien la despliega (`USER_DEPLOYING`)
@@ -57,7 +63,8 @@ editor. Por eso:
   sigue detectando el editor a partir del código.
 - Las funciones puras (dupla de dos tutores, equipos de la dupla, validación del registro,
   semáforo de peor caso y `valor`, tablas de análisis, panel y semana ISO, armado del prompt,
-  plantilla sin IA, cascada de modelos, estructura de la minuta, normalización de nombres) no tocan servicios de
+  plantilla sin IA, cascada de modelos, estructura de la minuta, normalización de nombres, lista y
+  plan para eliminar tutorías) no tocan servicios de
   Google y tienen pruebas en `pruebas/`, que corren con:
 
   ```powershell
@@ -150,6 +157,28 @@ registro en curso no se pierde. El panel se carga al entrar por primera vez y co
   `--color-amarillo`, `--color-rojo` y `--color-gris`; cada celda de color lleva también la
   inicial o el texto. Todo texto de la planilla pasa por `escapar`. En el teléfono, tarjetas de
   dos en dos y tablas con desplazamiento horizontal propio y la primera columna fija.
+
+## Eliminar tutorías
+
+Solo en la planilla, nunca en la aplicación web: menú **Copiloto > Eliminar tutorías…**, que abre
+el diálogo modal `Eliminar.html`. El Panel lo ve cualquiera; eliminar queda para quien edita la
+planilla.
+
+- **Permiso del diálogo.** Toda función global se puede llamar con `google.script.run`, también
+  desde la aplicación web. Por eso `abrirEliminarTutorias` guarda en `CacheService` un permiso al
+  azar (dura una hora) y lo pasa al diálogo; `obtenerTutoriasParaEliminar` y `eliminarTutorias`
+  no hacen nada sin él. Cualquier función nueva que borre, o que lea para borrar, lo exige igual.
+- **Lista** (`listarTutoriasParaEliminar`, pura): más recientes primero, con fecha, semestre,
+  curso, equipo, proyecto, hito, dupla, `registrada_en` y estado del acta, copiada campo por campo
+  (nunca `integrantes_presentes`). En el navegador: casillas, filtro por fecha de registro y
+  confirmación con cuántas tutorías y cuántas actas aprobadas se eliminan.
+- **Servidor** (`eliminarTutorias`, con `conBloqueo`): lee una vez `Tutorias`,
+  `PESTANAS_DE_LA_TUTORIA` y `Actas`; `planEliminarTutorias` (pura) dice qué filas borrar en cada
+  una y qué documentos quedan; `borrarNumerosDeFila` (la misma que usa `borrarFilasDeTutoria`)
+  las borra de abajo hacia arriba, y al final hay una sola llamada a `recalcularSinBloqueo`. Un id
+  que no está en `Tutorias` no borra nada.
+- **Drive** (regla 11): los documentos de las actas aprobadas no se tocan. El diálogo final los
+  lista con su enlace para borrarlos a mano desde la carpeta de actas.
 
 ## Data Studio (opcional)
 
